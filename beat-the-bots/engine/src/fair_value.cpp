@@ -23,7 +23,6 @@ FairValue::FairValue(Price initial, std::int64_t vol_fp, std::uint32_t tick_ms, 
       base_vol_(vol_fp),
       // sqrt(dt) in 16.16 = sqrt(dt * 2^32), with dt in seconds.
       sqrt_dt_fp_(static_cast<std::int64_t>(isqrt((static_cast<std::uint64_t>(tick_ms) << 32) / 1000))),
-      tick_ms_(tick_ms),
       rng_(seed) {}
 
 void FairValue::step(std::int64_t regime_fp) {
@@ -35,7 +34,7 @@ void FairValue::step(std::int64_t regime_fp) {
   vol_ = std::clamp(vol_, target / 3, target * 3);
 
   const std::int64_t sigma_tick = vol_ * sqrt_dt_fp_ / kFp;  // ticks (fp) per tick
-  fv_ += sigma_tick * rng_.normal_fp16() / kFp + drift_per_tick_;
+  fv_ += sigma_tick * rng_.normal_fp16() / kFp;
 }
 
 }  // namespace btb

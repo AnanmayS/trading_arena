@@ -17,9 +17,16 @@ const char* to_string(BotKind k) {
 }
 
 namespace {
-template <class T>
-T sign(T v) {
-  return (v > 0) - (v < 0);
+// Bots never send naked market orders: an aggressive order is an IOC that may
+// walk at most `slip` ticks past the touch, so a thin book cannot fill it at
+// an absurd price.
+SubmitResult take(const MarketView& m, OrderSink& out, Side side, Qty qty, Price slip) {
+  if (side == Side::Buy) {
+    if (!m.has_ask()) return {};
+    return out.submit(Side::Buy, OrderType::IOC, m.best_ask() + slip, qty);
+  }
+  if (!m.has_bid()) return {};
+  return out.submit(Side::Sell, OrderType::IOC, m.best_bid() - slip, qty);
 }
 }  // namespace
 
@@ -45,51 +52,55 @@ void MarketMaker::place(const MarketView& m, OrderSink& out, Quote& q, Side side
   }
   q = {};
   const SubmitResult r = out.submit(side, OrderType::Limit, px, qty);
+  own_flow_ += signed_qty(side, r.filled);  // our own aggression is not information
   if (r.resting > 0) q = {r.id, px};
-}
-
-bool MarketMaker::own_level(const MarketView& m, Price px) const {
-  for (const auto* side : {&bids_, &asks_})
-    for (const Quote& q : *side)
-      if (q.price == px && m.is_live(q.id)) return true;
-  return false;
 }
 
 void MarketMaker::on_tick(const MarketView& m, OrderSink& out) {
   const SimTime now = m.now();
 
-  // Headline: lean the estimate by part of the move such news usually brings.
-  // Major headlines also make the maker pull its quotes and step back.
-  std::int32_t sentiment = 0;
-  if (m.headline_time() != seen_headline_ && m.recent_headline(500'000, &sentiment)) {
-    seen_headline_ = m.headline_time();
-    static constexpr Price kTypicalMove[] = {0, 12, 35, 80};
-    const Price move = kTypicalMove[std::abs(sentiment)] * p_.news_react_pct / 100;
-    est_fp_ += (sentiment < 0 ? -move : move) * kFp;
-    if (std::abs(sentiment) >= 2) {
+  // A market-moving headline: pull quotes now, and reprice by (roughly) its
+  // impact once the market digests it. Each maker misjudges it a little.
+  const PublicNews& news = m.latest_news();
+  if (news.time_us != seen_headline_ && news.time_us >= 0) {
+    seen_headline_ = news.time_us;
+    if (news.impact != 0) {
       pull(m, out);
-      pause_until_ = now + p_.pause_us;
+      const std::int64_t pct = p_.news_react_pct + rng_.range(-3, 3);
+      pending_news_ = news.impact * pct / 100;
+      news_digest_ = news.digest_us;
+      pause_until_ = std::max(pause_until_, news.digest_us + rng_.range(0, p_.pause_us / 4));
     }
   }
-  // Big move in the last second: someone knows something. Step back.
-  if (!m.history().empty() && std::llabs(m.mark() - m.history().ago(1'000'000)) >= p_.pull_move &&
-      now >= pause_until_) {
-    pull(m, out);
-    pause_until_ = now + p_.pause_us / 2;
+  if (pending_news_ != 0 && now >= news_digest_) {
+    est_fp_ += pending_news_ * kFp;
+    pending_news_ = 0;
   }
+  // Big move in the last second: someone knows something. Quote wider for a
+  // while instead of vanishing (pulling everything would leave a vacuum).
+  if (!m.history().empty() && std::llabs(m.mark() - m.history().ago(1'000'000)) >= p_.pull_move)
+    wide_until_ = now + p_.pause_us;
 
   // Learn from the tape: net aggressive buying lifts the estimate, selling
-  // sinks it, and it drifts toward where the market actually trades.
-  const std::int64_t flow = m.signed_volume() - seen_volume_;
+  // sinks it. While quoting, it also drifts slowly toward where the market
+  // actually trades (not while stepped back, or stale prints from before a
+  // headline would drag it back).
+  // Flow around a headline (stepped back, then repricing into stale orders)
+  // is the news being traded. The headline repricing already covers it, so
+  // it is discarded rather than learned from; otherwise makers would chase
+  // each other's repricing trades into a crash.
+  const std::int64_t flow = m.signed_volume() - seen_volume_ - own_flow_;
   seen_volume_ = m.signed_volume();
-  est_fp_ += flow * p_.flow_impact_fp;
-  est_fp_ += (m.last_trade() * kFp - est_fp_) / p_.tape_follow_div;
+  own_flow_ = 0;
   if (now < pause_until_) return;
+  const bool repricing = news_digest_ >= 0 && now < news_digest_ + 1'000'000;
+  if (!repricing) est_fp_ += flow * p_.flow_impact_fp;
+  est_fp_ += (m.last_trade() * kFp - est_fp_) / p_.tape_follow_div;
   if (!rng_.chance(p_.requote_per_mille, 1000)) return;
 
   const Qty pos = position(m);
   const Price rv = m.history().realized_vol(5);
-  const Price half = p_.half_spread + rv * p_.vol_widen_fp / kFp;
+  const Price half = p_.half_spread + rv * p_.vol_widen_fp / kFp + (now < wide_until_ ? 2 : 0);
   const Price skew = -static_cast<Price>(pos) * p_.skew_fp / kFp;
   const Price center = (est_fp_ + kFp / 2) / kFp + skew + bias_;
 
@@ -98,10 +109,14 @@ void MarketMaker::on_tick(const MarketView& m, OrderSink& out) {
     const Qty qty = static_cast<Qty>(p_.size * (i + 1) + rng_.range(-1, 1));
     Price bid = center - half - i * p_.level_step;
     Price ask = center + half + i * p_.level_step;
-    // Post-only behaviour: a maker never crosses the book, it slides its
-    // quote behind the opposite touch instead (unless that touch is its own).
-    if (m.has_ask() && bid >= m.best_ask() && !own_level(m, m.best_ask())) bid = m.best_ask() - 1 - i * p_.level_step;
-    if (m.has_bid() && ask <= m.best_bid() && !own_level(m, m.best_bid())) ask = m.best_bid() + 1 + i * p_.level_step;
+    // Post-only: a maker slides its quote behind the opposite touch rather
+    // than cross it. The exception is the second after a headline is
+    // digested, when resting orders priced before the news are stale and the
+    // maker trades straight into them.
+    if (!repricing) {
+      if (m.has_ask() && bid >= m.best_ask()) bid = m.best_ask() - 1 - i * p_.level_step;
+      if (m.has_bid() && ask <= m.best_bid()) ask = m.best_bid() + 1 + i * p_.level_step;
+    }
     // At the inventory limit, stop quoting the side that would add to it.
     if (pos < p_.max_inventory) {
       place(m, out, bids_[ui], Side::Buy, bid, std::max<Qty>(1, qty));
@@ -128,16 +143,16 @@ void MomentumTrader::on_tick(const MarketView& m, OrderSink& out) {
   if (pos != 0) {
     const bool reversed = pos > 0 ? move <= -p_.threshold / 2 : move >= p_.threshold / 2;
     if (reversed || m.now() - entered_ > p_.max_hold_us) {
-      out.submit(pos > 0 ? Side::Sell : Side::Buy, OrderType::Market, 0, std::min(std::abs(pos), p_.size * 2));
+      take(m, out, pos > 0 ? Side::Sell : Side::Buy, std::min(std::abs(pos), p_.size * 2), 3);
       return;
     }
   }
   if (move >= p_.threshold && pos < p_.max_position) {
     if (pos == 0) entered_ = m.now();
-    out.submit(Side::Buy, OrderType::Market, 0, p_.size);
+    take(m, out, Side::Buy, p_.size, 3);
   } else if (move <= -p_.threshold && pos > -p_.max_position) {
     if (pos == 0) entered_ = m.now();
-    out.submit(Side::Sell, OrderType::Market, 0, p_.size);
+    take(m, out, Side::Sell, p_.size, 3);
   }
 }
 
@@ -184,6 +199,14 @@ void MeanReversionTrader::on_tick(const MarketView& m, OrderSink& out) {
 
 void NoiseTrader::on_tick(const MarketView& m, OrderSink& out) {
   const SimTime now = m.now();
+  const PublicNews& news = m.latest_news();
+  if (news.time_us != seen_headline_ && news.time_us >= 0) {
+    seen_headline_ = news.time_us;
+    if (std::llabs(news.impact) >= 20 && rng_.chance(1, 2)) {
+      for (const Working& w : live_) out.cancel(w.id);
+      live_.clear();
+    }
+  }
   std::erase_if(live_, [&](const Working& w) {
     if (!m.is_live(w.id)) return true;
     if (now < w.expires) return false;
@@ -198,7 +221,7 @@ void NoiseTrader::on_tick(const MarketView& m, OrderSink& out) {
   const Qty qty = static_cast<Qty>(rng_.range(1, p_.max_size));
 
   if (rng_.below(100) < p_.market_pct) {
-    out.submit(side, OrderType::Market, 0, qty);
+    take(m, out, side, qty, 4);
     return;
   }
   // Offsets skew small (min of two draws) so the inside of the book is busiest.
@@ -226,15 +249,25 @@ void InformedTrader::on_tick(const MarketView& m, OrderSink& out) {
   // Bigger edge, bigger size (up to 3x).
   const Qty qty = static_cast<Qty>(p_.size * std::min<Price>(3, std::max<Price>(1, std::llabs(edge) / p_.threshold)));
 
+  if (m.is_live(unwind_) && (now - unwind_at_ > 2'000'000 || std::llabs(edge) >= p_.threshold)) {
+    out.cancel(unwind_);
+    unwind_ = kNoOrder;
+  }
   if (edge >= p_.threshold && pos < p_.max_position) {
     out.submit(Side::Buy, OrderType::IOC, est - p_.threshold / 2, std::min(qty, p_.max_position - pos));
   } else if (edge <= -p_.threshold && pos > -p_.max_position) {
     out.submit(Side::Sell, OrderType::IOC, est + p_.threshold / 2, std::min(qty, p_.max_position + pos));
-  } else if (std::llabs(edge) <= 1 && pos != 0 && rng_.chance(1, 4)) {
-    // At fair value: take some risk off at the touch.
+  } else if (pos != 0 && !m.is_live(unwind_)) {
+    // No edge left: rest an order at the touch on the reducing side and let
+    // other traders take it, which unwinds without pushing the price around.
     const Side side = pos > 0 ? Side::Sell : Side::Buy;
-    const Price px = side == Side::Sell ? (m.has_bid() ? m.best_bid() : est) : (m.has_ask() ? m.best_ask() : est);
-    out.submit(side, OrderType::IOC, px, std::min(std::abs(pos), p_.size));
+    const Price px = side == Side::Sell ? std::max(est, m.has_ask() ? m.best_ask() : est + 1)
+                                        : std::min(est, m.has_bid() ? m.best_bid() : est - 1);
+    const SubmitResult r = out.submit(side, OrderType::Limit, px, std::min(std::abs(pos), p_.size * 2));
+    if (r.resting > 0) {
+      unwind_ = r.id;
+      unwind_at_ = now;
+    }
   }
 }
 

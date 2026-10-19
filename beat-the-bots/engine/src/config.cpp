@@ -22,12 +22,9 @@ void apply_difficulty(GameConfig& c, Difficulty d) {
   switch (d) {
     case Difficulty::Easy:
       // Calmer market, generous headline lead, informed flow is slow and noisy.
-      c.market.vol_fp = kFp * 3 / 2;
+      c.market.vol_fp = kFp * 11 / 10;
       c.makers.half_spread = 1;
       c.makers.size = 6;
-      c.informed.noise = 8;
-      c.informed.act_per_mille = 60;
-      c.informed.size = 2;
       c.news.lead_min_us = 1'500'000;
       c.news.lead_max_us = 2'500'000;
       c.news.jump_pct = 80;
@@ -38,11 +35,11 @@ void apply_difficulty(GameConfig& c, Difficulty d) {
     case Difficulty::Hard:
       // Wider, jumpier market; informed trader moves price to value fast and
       // headlines land with the jump, leaving almost no time to react.
-      c.market.vol_fp = kFp * 13 / 5;
+      c.market.vol_fp = kFp * 19 / 10;
       c.makers.half_spread = 2;
       c.makers.size = 3;
       c.makers.pause_us = 2'000'000;
-      c.informed.noise = 2;
+      c.informed.noise = 1;
       c.informed.act_per_mille = 220;
       c.informed.size = 4;
       c.news.lead_min_us = 0;
@@ -66,9 +63,8 @@ void apply_scenario(GameConfig& c, Scenario s) {
       c.news.headlines = 4;
       break;
     case Scenario::ShortSqueeze:
-      c.momentum.count = 10;
-      c.momentum.act_per_mille = 70;
-      c.momentum.max_position = 12;
+      c.momentum.count = 9;
+      c.momentum.act_per_mille = 45;
       c.news.headlines = 4;
       break;
     case Scenario::ThinLiquidity:

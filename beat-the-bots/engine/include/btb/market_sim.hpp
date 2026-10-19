@@ -130,7 +130,6 @@ class MarketSim {
   std::vector<NewsItem> news_;
   std::size_t next_news_ = 0;
   std::vector<NewsItem> pending_jumps_;
-  SimTime drift_until_ = -1;
 
   std::vector<std::unique_ptr<Bot>> bots_;
   std::vector<std::unique_ptr<Sink>> sinks_;

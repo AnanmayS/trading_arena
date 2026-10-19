@@ -21,8 +21,6 @@ class FairValue {
   // (calm open, hot close, ...).
   void step(std::int64_t regime_fp);
   void jump(Price ticks) { fv_ += ticks * kFp; }
-  // Constant drift in ticks per second (fixed point), e.g. for a squeeze.
-  void set_drift(std::int64_t ticks_per_sec_fp) { drift_per_tick_ = ticks_per_sec_fp * tick_ms_ / 1000; }
 
   Price value() const { return (fv_ + kFp / 2) >> 16; }  // nearest tick
   std::int64_t raw_fp() const { return fv_; }
@@ -33,8 +31,6 @@ class FairValue {
   std::int64_t vol_;
   std::int64_t base_vol_;
   std::int64_t sqrt_dt_fp_;
-  std::int64_t drift_per_tick_ = 0;
-  std::int64_t tick_ms_;
   Rng rng_;
 };
 

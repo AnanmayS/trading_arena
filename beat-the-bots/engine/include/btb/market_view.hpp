@@ -66,9 +66,14 @@ class PriceHistory {
   std::size_t count_ = 0;
 };
 
+// The latest headline as everyone sees it. Like a real release ("Fed hikes
+// 75bp"), it says how big the news is; markets digest it at `digest_us`, a
+// moment after it appears. That gap is the player's window.
 struct PublicNews {
   SimTime time_us = -1;  // -1: no headline yet
   std::int32_t sentiment = 0;
+  Price impact = 0;        // ticks the news is worth
+  SimTime digest_us = -1;  // when the market reprices
 };
 
 class MarketView {
@@ -94,13 +99,7 @@ class MarketView {
     return o ? o->price : 0;
   }
 
-  // Most recent headline, if it was published within the last `us`.
-  bool recent_headline(SimTime us, std::int32_t* sentiment) const {
-    if (news_.time_us < 0 || now() - news_.time_us > us) return false;
-    *sentiment = news_.sentiment;
-    return true;
-  }
-  SimTime headline_time() const { return news_.time_us; }
+  const PublicNews& latest_news() const { return news_; }
 
  private:
   const Exchange& ex_;

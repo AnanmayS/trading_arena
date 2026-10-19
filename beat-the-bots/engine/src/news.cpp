@@ -43,6 +43,9 @@ constexpr Headline kHeadlines[] = {
     {"Sell orders overwhelm the book; circuit breakers eyed", -3},
     {"Short interest at record high; shorts scramble to cover", 3},
     {"Bargain hunters step in after the plunge", 2},
+    {"Short sellers scramble as losses mount", 2},
+    {"Margin calls force another wave of short covering", 2},
+    {"Squeeze accelerates: shorts capitulate", 3},
 };
 
 constexpr std::uint32_t kRegular = 23;  // ids past this are scripted specials
@@ -106,10 +109,15 @@ std::vector<NewsItem> make_news_schedule(const GameConfig& cfg, Rng& rng) {
       break;
     }
     case Scenario::ShortSqueeze: {
-      NewsItem* it = add(round_us * 30 / 100, 3, 24);
-      it->jump = 30;
-      it->drift_fp = 3 * kFp / 2;  // +1.5 ticks per second
-      it->drift_us = round_us * 35 / 100;
+      // A rolling squeeze: one headline after another, each forcing more
+      // covering, with momentum bots piling in between.
+      add(round_us * 30 / 100, 3, 24)->jump = 30;
+      static constexpr std::uint32_t kWaves[] = {26, 27, 26, 28, 27};
+      SimTime t = round_us * 30 / 100;
+      for (const std::uint32_t h : kWaves) {
+        t += round_us * 5 / 100 + rng.range(0, round_us * 2 / 100);
+        add(t, kHeadlines[h].sentiment, h)->jump = rng.range(14, 28) * np.jump_pct / 100;
+      }
       break;
     }
     default:

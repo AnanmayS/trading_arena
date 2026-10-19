@@ -138,22 +138,14 @@ void MarketSim::tick() {
     while (next_news_ < news_.size() && news_[next_news_].release_us <= now_) {
       const NewsItem& n = news_[next_news_++];
       ex_.publish_news(n.headline, n.sentiment);
-      public_news_ = {now_, n.sentiment};
-      if (n.jump != 0 || n.drift_fp != 0) pending_jumps_.push_back(n);
+      public_news_ = {now_, n.sentiment, n.jump, n.jump_us};
+      if (n.jump != 0) pending_jumps_.push_back(n);
     }
     std::erase_if(pending_jumps_, [&](const NewsItem& n) {
       if (n.jump_us > now_) return false;
       fv_.jump(n.jump);
-      if (n.drift_fp != 0) {
-        fv_.set_drift(n.drift_fp);
-        drift_until_ = now_ + n.drift_us;
-      }
       return true;
     });
-    if (drift_until_ >= 0 && now_ >= drift_until_) {
-      fv_.set_drift(0);
-      drift_until_ = -1;
-    }
 
     // 2. Hidden value moves.
     fv_.step(regime_fp());

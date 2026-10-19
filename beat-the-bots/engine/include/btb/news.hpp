@@ -27,9 +27,6 @@ struct NewsItem {
   std::uint32_t headline = 0;
   std::int32_t sentiment = 0;
   Price jump = 0;  // ticks, signed
-  // Optional slow drift in ticks/second (fp) starting at the jump.
-  std::int64_t drift_fp = 0;
-  SimTime drift_us = 0;
 };
 
 // Builds the round's schedule, sorted by release time.

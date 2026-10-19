@@ -39,6 +39,7 @@ class MarketMaker final : public Bot {
   MarketMaker(ParticipantId id, std::uint64_t seed, const MakerParams& p, Price initial);
   void on_tick(const MarketView& m, OrderSink& out) override;
   BotKind kind() const override { return BotKind::MarketMaker; }
+  Price estimate() const { return (est_fp_ + kFp / 2) / kFp; }
 
  private:
   struct Quote {
@@ -47,14 +48,17 @@ class MarketMaker final : public Bot {
   };
   void place(const MarketView& m, OrderSink& out, Quote& q, Side side, Price px, Qty qty);
   void pull(const MarketView& m, OrderSink& out);
-  bool own_level(const MarketView& m, Price px) const;
 
   MakerParams p_;
   std::int64_t est_fp_;
   Price bias_;  // small per-bot offset so makers do not all quote identically
   SimTime pause_until_ = 0;
+  SimTime wide_until_ = 0;
   SimTime seen_headline_ = -1;
+  Price pending_news_ = 0;     // repricing still to apply at digest time
+  SimTime news_digest_ = -1;
   std::int64_t seen_volume_ = 0;
+  std::int64_t own_flow_ = 0;  // our own aggressive volume since the last tick
   std::vector<Quote> bids_, asks_;
 };
 
@@ -97,10 +101,13 @@ class NoiseTrader final : public Bot {
   };
   NoiseParams p_;
   std::vector<Working> live_;
+  SimTime seen_headline_ = -1;
 };
 
 // Sees a noisy version of the hidden fair value and trades toward it. This is
 // what makes order flow informative: when it buys, the price is going up.
+// Once the price has caught up it works its position back down passively, so
+// it is an arbitrageur rather than a gambler holding inventory into news.
 class InformedTrader final : public Bot {
  public:
   InformedTrader(ParticipantId id, std::uint64_t seed, const InformedParams& p, const FairValue& fv)
@@ -113,6 +120,8 @@ class InformedTrader final : public Bot {
   const FairValue& fv_;
   Price error_ = 0;  // persistent estimation error, redrawn every few seconds
   SimTime error_until_ = 0;
+  OrderId unwind_ = kNoOrder;  // passive order working the position down
+  SimTime unwind_at_ = 0;
 };
 
 }  // namespace btb

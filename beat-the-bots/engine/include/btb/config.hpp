@@ -21,7 +21,7 @@ inline constexpr std::int64_t kFp = 65536;  // 1.0 in 16.16 fixed point
 struct MakerParams {
   int count = 4;
   Price half_spread = 1;      // ticks from estimate to best quote
-  int levels = 3;             // quote levels per side
+  int levels = 4;             // quote levels per side
   Price level_step = 1;       // ticks between levels
   Qty size = 4;               // size at the best level; deeper levels add `size` each
   std::int64_t skew_fp = kFp / 4;  // quote shift in ticks per contract of inventory
@@ -31,12 +31,11 @@ struct MakerParams {
   SimTime pause_us = 1'200'000;
   std::uint32_t requote_per_mille = 600;  // chance per tick to refresh quotes
   // How the estimate learns. Aggressive buying anywhere on the tape raises it
-  // by flow_impact ticks per contract (a Kyle-style price impact); it also
-  // drifts toward the last trade, and jumps on headlines by a fraction of the
-  // move that headline's sentiment usually brings.
-  std::int64_t flow_impact_fp = kFp * 15 / 100;
-  int tape_follow_div = 32;
-  int news_react_pct = 75;
+  // by flow_impact ticks per contract (a Kyle-style price impact); it drifts
+  // slowly toward the last trade; and it reprices on headlines.
+  std::int64_t flow_impact_fp = kFp * 25 / 100;
+  int tape_follow_div = 400;
+  int news_react_pct = 100;  // how much of a headline's impact makers price in
 };
 
 struct MomentumParams {
@@ -70,16 +69,16 @@ struct NoiseParams {
 
 struct InformedParams {
   int count = 1;
-  Price noise = 4;      // stddev of its fair-value estimate, ticks
+  Price noise = 2;      // stddev of its fair-value estimate, ticks
   Price threshold = 4;  // minimum edge before trading
   Qty size = 3;
-  Qty max_position = 200;
+  Qty max_position = 150;
   std::uint32_t act_per_mille = 120;
 };
 
 struct MarketParams {
   Price initial_price = 20000;          // 5000.00 index points
-  std::int64_t vol_fp = 2 * kFp;        // ticks per sqrt(second)
+  std::int64_t vol_fp = kFp * 14 / 10;   // ticks per sqrt(second)
   std::int64_t open_vol_mult_fp = kFp * 6 / 10;   // calm open
   std::int64_t close_vol_mult_fp = kFp * 18 / 10; // hot close
 };
