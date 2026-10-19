@@ -5,7 +5,9 @@
 // action log). The UI calls step(ms) with wall-clock deltas, but the engine
 // only ever advances in whole ticks, and each player action is stamped with
 // the number of ticks completed before it. Replaying the log against the same
-// seed reproduces the exact event stream (see replay()).
+// seed reproduces the exact event stream (see replay()). A sim constructed
+// with a log is a replay: it applies each logged action itself, just before
+// the tick it was stamped against, however step() is sliced.
 #pragma once
 
 #include <memory>
@@ -62,6 +64,8 @@ struct RoundSummary {
 class MarketSim {
  public:
   MarketSim(std::uint64_t seed, const GameConfig& cfg);
+  // Replay: re-applies `log` at its recorded ticks while the round advances.
+  MarketSim(std::uint64_t seed, const GameConfig& cfg, std::vector<PlayerAction> log);
   ~MarketSim();
   MarketSim(const MarketSim&) = delete;
   MarketSim& operator=(const MarketSim&) = delete;
@@ -79,6 +83,7 @@ class MarketSim {
   SubmitResult player_flatten();
   void apply(const PlayerAction& a);
   const std::vector<PlayerAction>& action_log() const { return actions_; }
+  bool replaying() const { return replaying_; }
 
   // Re-runs a round from its seed, config and action log; returns the final
   // event-stream hash.
@@ -104,6 +109,9 @@ class MarketSim {
   EngineStats stats() const;
   // Player equity sampled once per simulated second.
   const std::vector<Cents>& equity_curve() const { return equity_curve_; }
+  // Hidden fair value in ticks at each whole second (index = second, starting
+  // at the open). Like fair_value(), the UI may only see it after the round.
+  const std::vector<Price>& fair_value_curve() const { return fv_curve_; }
   Cents max_drawdown() const { return max_dd_; }
   // Valid once finished().
   RoundSummary summary() const;
@@ -111,6 +119,7 @@ class MarketSim {
  private:
   static constexpr SimTime kPreOpenUs = 1'000'000;
   class Sink;
+  void advance();  // applies due replay actions, then ticks
   void tick();
   std::int64_t regime_fp() const;
   bool goal_met(Cents pnl, std::uint32_t liquidations) const;
@@ -145,6 +154,10 @@ class MarketSim {
   bool finished_ = false;
 
   std::vector<PlayerAction> actions_;
+  std::vector<PlayerAction> replay_log_;
+  std::size_t replay_next_ = 0;
+  bool replaying_ = false;
+  std::vector<Price> fv_curve_;
   std::vector<Cents> equity_curve_;
   Cents peak_equity_ = 0;
   Cents max_dd_ = 0;

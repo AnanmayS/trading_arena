@@ -117,9 +117,10 @@ export interface RoundSummary {
   liquidations: number;
   goalMet: number;
   settlementPrice: number;
-  fairValue: number;
+  fairValue: number; // ticks; the engine only reveals it once the round is finished
   bots: { kind: string; pnl: number }[];
-  equity: number[];
+  equity: number[]; // cents, index = second (plus a final post-settlement sample)
+  fairValues: number[]; // hidden fair value in ticks, index = second
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -143,12 +144,19 @@ export class BtbEngine {
   private readonly wasm: WasmEngine;
   private disposed = false;
 
-  constructor(mod: BtbModule, opts: GameOptions) {
+  /**
+   * With `replayLog` (from actionLog() of a finished round on the same options)
+   * the engine re-plays that round by itself; player commands must not be sent.
+   */
+  constructor(mod: BtbModule, opts: GameOptions, replayLog?: string) {
     this.mod = mod;
     const config: Record<string, string | number> = { difficulty: opts.difficulty };
     if (opts.scenario) config.scenario = opts.scenario;
     if (opts.roundSeconds) config.round_seconds = opts.roundSeconds;
-    this.wasm = new mod.Engine(opts.seed, JSON.stringify(config));
+    this.wasm =
+      replayLog === undefined
+        ? new mod.Engine(opts.seed, JSON.stringify(config))
+        : new mod.Engine(opts.seed, JSON.stringify(config), replayLog);
     const err = this.wasm.configError();
     if (err) throw new Error(`engine config: ${err}`);
     if (this.wasm.frameSize() !== FRAME_SIZE) throw new Error('engine frame layout mismatch: rebuild the wasm module');
@@ -199,6 +207,15 @@ export class BtbEngine {
 
   finished(): boolean {
     return this.wasm.finished();
+  }
+
+  replaying(): boolean {
+    return this.wasm.replaying();
+  }
+
+  /** Every player command so far, tick-stamped, as an opaque JSON string for replay. */
+  actionLog(): string {
+    return this.wasm.actionLogJson();
   }
 
   dispose(): void {

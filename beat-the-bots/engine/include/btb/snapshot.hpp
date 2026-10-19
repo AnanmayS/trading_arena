@@ -8,7 +8,9 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "btb/event.hpp"
@@ -67,8 +69,17 @@ using Frame = std::array<std::int64_t, kFrameSize>;
 
 void write(const MarketSim& sim, Frame& out);
 
-// End-of-round results and per-bot P&L as a JSON object (called once).
+// End-of-round results, per-bot P&L, the equity curve and the hidden
+// fair-value series as a JSON object (called once). Before the round is
+// finished the fair-value fields are withheld.
 std::string summary_json(const MarketSim& sim);
+
+// The player's action log as a flat JSON integer array, kActionFields per
+// action: tick, kind, side, type, price, qty, id.
+inline constexpr int kActionFields = 7;
+std::string actions_json(const std::vector<PlayerAction>& log);
+// Inverse of actions_json(); rejects malformed or out-of-order logs.
+std::optional<std::vector<PlayerAction>> parse_actions(std::string_view json, std::string* error = nullptr);
 // Static catalog: headlines, scenarios, contract spec (called once).
 std::string catalog_json();
 

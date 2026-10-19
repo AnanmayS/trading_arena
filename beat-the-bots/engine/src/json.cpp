@@ -109,6 +109,27 @@ std::optional<FlatObject> FlatObject::parse(std::string_view text, std::string* 
   return obj;
 }
 
+std::optional<std::vector<std::int64_t>> parse_int_array(std::string_view text, std::string* error) {
+  Parser p{text, 0, {}};
+  std::vector<std::int64_t> out;
+  auto failed = [&]() -> std::optional<std::vector<std::int64_t>> {
+    if (error) *error = p.err.empty() ? "invalid JSON" : p.err;
+    return std::nullopt;
+  };
+  if (!p.eat('[')) return p.fail("expected '['"), failed();
+  if (!p.eat(']')) {
+    do {
+      std::int64_t v = 0;
+      if (!p.integer(v)) return failed();
+      out.push_back(v);
+    } while (p.eat(','));
+    if (!p.eat(']')) return p.fail("expected ']'"), failed();
+  }
+  p.ws();
+  if (p.i != text.size()) return p.fail("trailing characters"), failed();
+  return out;
+}
+
 std::optional<std::int64_t> FlatObject::integer(const std::string& key) const {
   const auto it = values_.find(key);
   if (it == values_.end() || it->second.kind != Value::Int) return std::nullopt;

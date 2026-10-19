@@ -6,7 +6,9 @@ import { Landing } from './components/Landing';
 import { Keys, readJson, writeJson } from './game/storage';
 import { parseLaunch, randomSeed, shareUrl } from './game/url';
 
-type Screen = { kind: 'landing' } | { kind: 'game'; options: GameOptions; tutorial: boolean; key: number };
+type Screen =
+  | { kind: 'landing' }
+  | { kind: 'game'; options: GameOptions; tutorial: boolean; key: number; replay?: { log: string; pnl: number } };
 
 export function App() {
   const launch = useMemo(() => parseLaunch(window.location.search), []);
@@ -56,10 +58,12 @@ export function App() {
         catalog={catalog}
         options={options}
         tutorial={screen.tutorial}
+        replay={screen.replay}
         onTutorialDone={() => {
           setTutorialDone(true);
           writeJson(Keys.tutorialDone, true);
         }}
+        onWatchReplay={(log, pnl) => setScreen({ kind: 'game', options, tutorial: false, key: Date.now(), replay: { log, pnl } })}
         onReplay={() => start({ ...options }, false)}
         onNew={() => start({ ...options, seed: randomSeed(), scenario: undefined }, false)}
         onQuit={() => setScreen({ kind: 'landing' })}

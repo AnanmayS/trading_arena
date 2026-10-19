@@ -24,12 +24,15 @@ export interface WasmEngine {
   finished(): boolean;
   getStats(): WasmStats;
   summaryJson(): string;
+  actionLogJson(): string;
+  replaying(): boolean;
   delete(): void;
 }
 
 export interface BtbModule {
   Engine: {
     new (seed: number, configJson: string): WasmEngine;
+    new (seed: number, configJson: string, actionsJson: string): WasmEngine;
     catalog(): string;
     selfTest(seed: number, configJson: string): string;
   };

@@ -2,6 +2,9 @@
 // player commands, and turns engine events into render-ready state (tape,
 // candles, headlines, toasts). It never decides anything about the market;
 // every rule lives in the engine.
+//
+// In replay mode the engine re-plays a finished round from its action log; the
+// controller only runs the clock faster and ignores player commands.
 import type { WasmStats } from '../engine/wasm/btb.js';
 import {
   BtbEngine,
@@ -31,6 +34,13 @@ export interface NewsEntry {
   text: string;
 }
 
+/** Every headline of the round, kept in release order for chart markers. */
+export interface HeadlineMark {
+  timeUs: number;
+  text: string;
+  sentiment: number;
+}
+
 export interface FillMarker {
   timeUs: number;
   price: number;
@@ -56,6 +66,8 @@ const TAPE_MAX = 80;
 const NEWS_MAX = 30;
 const TOAST_MS = 3200;
 const MAX_FRAME_MS = 250;
+export const REPLAY_SPEEDS = [4, 8] as const;
+export type ReplaySpeed = (typeof REPLAY_SPEEDS)[number];
 
 export class GameController {
   readonly options: GameOptions;
@@ -64,6 +76,7 @@ export class GameController {
   frame: Frame;
   tape: TapeEntry[] = [];
   news: NewsEntry[] = [];
+  headlines: HeadlineMark[] = [];
   fills: FillMarker[] = [];
   toasts: Toast[] = [];
   flash: TradeFlash | null = null;
@@ -73,6 +86,10 @@ export class GameController {
   summary: RoundSummary | null = null;
   paused = false;
   frameMs = 0; // smoothed main-thread cost of step + refresh
+  readonly replay: boolean;
+  speed: number = 1;
+  /** The round's action log, captured when it finishes (for "Watch replay"). */
+  actionLog: string | null = null;
 
   private readonly engine: BtbEngine;
   private listeners = new Set<() => void>();
@@ -83,10 +100,12 @@ export class GameController {
   private keySeq = 0;
   private running = false;
 
-  constructor(mod: BtbModule, catalog: Catalog, options: GameOptions) {
+  constructor(mod: BtbModule, catalog: Catalog, options: GameOptions, replayLog?: string) {
     this.options = options;
     this.catalog = catalog;
-    this.engine = new BtbEngine(mod, options);
+    this.engine = new BtbEngine(mod, options, replayLog);
+    this.replay = replayLog !== undefined;
+    if (this.replay) this.speed = REPLAY_SPEEDS[0];
     const { frame } = this.engine.refresh();
     this.frame = frame;
     this.candles = new CandleBuilder(frame.mark);
@@ -124,12 +143,18 @@ export class GameController {
     this.emit();
   }
 
+  setSpeed(speed: ReplaySpeed): void {
+    if (!this.replay) return;
+    this.speed = speed;
+    this.emit();
+  }
+
   private tick(now: number): void {
     const dt = Math.min(MAX_FRAME_MS, now - this.lastNow);
     this.lastNow = now;
     if (!this.paused && !this.frame.finished) {
       const t0 = performance.now();
-      this.engine.step(dt);
+      this.engine.step(dt * this.speed);
       this.pull(now);
       this.frameMs = this.frameMs * 0.95 + (performance.now() - t0) * 0.05;
     }
@@ -140,6 +165,7 @@ export class GameController {
     this.toasts = this.toasts.filter((t) => now - t.at < TOAST_MS);
     if (this.frame.finished && !this.summary) {
       this.summary = this.engine.summary();
+      this.actionLog = this.engine.actionLog();
       this.stop();
     }
     this.emit();
@@ -177,7 +203,7 @@ export class GameController {
   // Commands apply immediately, so the next frame is read right away: acks
   // and fills show up in the same frame as the click.
   private command(fn: () => unknown): void {
-    if (this.frame.finished || this.paused) return;
+    if (this.frame.finished || this.paused || this.replay) return;
     fn();
     this.pull();
     this.emit();
@@ -234,6 +260,7 @@ export class GameController {
         case EventType.News: {
           const h = this.catalog.headlines[e.aux];
           this.news.unshift({ key: ++this.keySeq, timeUs: e.timeUs, text: h ? h.text : '…' });
+          this.headlines.push({ timeUs: e.timeUs, text: h ? h.text : '…', sentiment: h ? h.sentiment : 0 });
           this.lastNewsAt = now;
           break;
         }

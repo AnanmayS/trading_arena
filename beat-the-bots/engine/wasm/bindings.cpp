@@ -32,6 +32,21 @@ class Engine {
     refresh();
   }
 
+  // Replay of a finished round: `actions_json` is a log from actionLogJson().
+  Engine(double seed, const std::string& config_json, const std::string& actions_json)
+      : events_(kMaxEventsPerDrain) {
+    auto cfg = parse_config(config_json, &error_);
+    if (!cfg) cfg = GameConfig{};
+    std::string log_error;
+    auto log = snapshot::parse_actions(actions_json, &log_error);
+    if (!log) {
+      if (error_.empty()) error_ = "action log: " + log_error;
+      log.emplace();
+    }
+    sim_ = std::make_unique<MarketSim>(static_cast<std::uint64_t>(seed), *cfg, std::move(*log));
+    refresh();
+  }
+
   std::string configError() const { return error_; }
 
   void step(int ms) {
@@ -62,6 +77,7 @@ class Engine {
   std::uintptr_t eventsPtr() const { return reinterpret_cast<std::uintptr_t>(events_.data()); }
   int eventCount() const { return static_cast<int>(event_count_); }
   bool finished() const { return sim_->finished(); }
+  bool replaying() const { return sim_->replaying(); }
 
   StatsView getStats() const {
     const EngineStats s = sim_->stats();
@@ -71,6 +87,7 @@ class Engine {
   }
 
   std::string summaryJson() const { return snapshot::summary_json(*sim_); }
+  std::string actionLogJson() const { return snapshot::actions_json(sim_->action_log()); }
 
   static std::string catalog() { return snapshot::catalog_json(); }
 
@@ -106,6 +123,7 @@ EMSCRIPTEN_BINDINGS(btb) {
 
   class_<Engine>("Engine")
       .constructor<double, std::string>()
+      .constructor<double, std::string, std::string>()
       .function("configError", &Engine::configError)
       .function("step", &Engine::step)
       .function("submit", &Engine::submit)
@@ -118,8 +136,10 @@ EMSCRIPTEN_BINDINGS(btb) {
       .function("eventsPtr", &Engine::eventsPtr)
       .function("eventCount", &Engine::eventCount)
       .function("finished", &Engine::finished)
+      .function("replaying", &Engine::replaying)
       .function("getStats", &Engine::getStats)
       .function("summaryJson", &Engine::summaryJson)
+      .function("actionLogJson", &Engine::actionLogJson)
       .class_function("catalog", &Engine::catalog)
       .class_function("selfTest", &Engine::selfTest);
 }

@@ -54,4 +54,56 @@ describe('BtbEngine (wasm)', () => {
     expect(a).toMatch(/^[0-9a-f]{16}$/);
     expect(a).toBe(b);
   });
+
+  it('a replay from the action log reproduces the round, final P&L included', async () => {
+    const mod = await loadModule();
+    const opts = { seed: 314, difficulty: 'hard' as const, roundSeconds: 20 };
+    const live = new BtbEngine(mod, opts);
+    // Uneven frames and a mix of commands, like a real session.
+    let i = 0;
+    while (!live.finished()) {
+      live.step(10 + ((i * 37) % 30));
+      if (i % 25 === 3) live.submit(i % 2 ? Side.Sell : Side.Buy, OrderType.Market, 0, 1 + (i % 3));
+      if (i % 60 === 7) {
+        const mark = live.refresh().frame.mark;
+        const id = live.submit(Side.Buy, OrderType.Limit, mark - 2, 1);
+        if (id && i % 120 === 7) live.cancel(id);
+      }
+      if (i % 200 === 150) live.flatten();
+      i++;
+    }
+    const before = live.summary();
+    const log = live.actionLog();
+    expect(JSON.parse(log).length).toBeGreaterThan(7 * 10);
+    live.dispose();
+
+    const replay = new BtbEngine(mod, opts, log);
+    expect(replay.replaying()).toBe(true);
+    while (!replay.finished()) replay.step(16 * 8); // 8x speed
+    const after = replay.summary();
+    expect(after.pnl).toBe(before.pnl);
+    expect(after).toEqual(before);
+    expect(replay.actionLog()).toBe(log);
+    replay.dispose();
+  });
+
+  it('a malformed action log is reported as a config error', async () => {
+    const mod = await loadModule();
+    expect(() => new BtbEngine(mod, { seed: 1, difficulty: 'easy' }, '[1,2')).toThrow(/action log/);
+  });
+
+  it('withholds the hidden fair value until the round is over', async () => {
+    const mod = await loadModule();
+    const e = new BtbEngine(mod, { seed: 8, difficulty: 'normal', roundSeconds: 15 });
+    for (let k = 0; k < 40; k++) e.step(100);
+    const mid = e.summary();
+    expect(mid.fairValues).toBeUndefined();
+    expect(mid.fairValue).toBeUndefined();
+    while (!e.finished()) e.step(250);
+    const s = e.summary();
+    expect(s.fairValues).toHaveLength(16);
+    expect(s.fairValues.every((v) => Number.isInteger(v) && v > 0)).toBe(true);
+    expect(s.fairValues[15]).toBe(s.fairValue);
+    e.dispose();
+  });
 });

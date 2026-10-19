@@ -1,4 +1,5 @@
-// Minimal JSON helpers, enough for flat config objects and catalog output.
+// Minimal JSON helpers, enough for flat config objects, integer arrays and
+// catalog output.
 // Keeps the engine dependency-free; not a general-purpose JSON library.
 #pragma once
 
@@ -7,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace btb::json {
 
@@ -29,6 +31,9 @@ class FlatObject {
   };
   std::map<std::string, Value> values_;
 };
+
+// Parses a flat array of integers: [1, -2, 3].
+std::optional<std::vector<std::int64_t>> parse_int_array(std::string_view text, std::string* error = nullptr);
 
 // Appends `s` to `out` as a quoted, escaped JSON string.
 void append_string(std::string& out, std::string_view s);

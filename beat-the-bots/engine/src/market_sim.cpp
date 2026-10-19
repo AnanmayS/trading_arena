@@ -82,6 +82,14 @@ MarketSim::MarketSim(std::uint64_t seed, const GameConfig& cfg)
   while (now_ < 0) tick();
   ticks_ = 0;
   engine_ns_ = 0;
+  fv_curve_.reserve(cfg.round_seconds + 1);
+  fv_curve_.push_back(fv_.value());
+}
+
+MarketSim::MarketSim(std::uint64_t seed, const GameConfig& cfg, std::vector<PlayerAction> log)
+    : MarketSim(seed, cfg) {
+  replay_log_ = std::move(log);
+  replaying_ = true;
 }
 
 MarketSim::~MarketSim() = default;
@@ -106,16 +114,25 @@ void MarketSim::step(std::uint32_t ms) {
   acc_us_ = std::min<SimTime>(acc_us_ + static_cast<SimTime>(ms) * 1000, 2'000'000);
   while (acc_us_ >= tick_us_ && !finished_) {
     acc_us_ -= tick_us_;
-    tick();
+    advance();
   }
 }
 
 void MarketSim::run_ticks(std::uint64_t n) {
-  for (std::uint64_t i = 0; i < n && !finished_; ++i) tick();
+  for (std::uint64_t i = 0; i < n && !finished_; ++i) advance();
 }
 
 void MarketSim::run_to_end() {
-  while (!finished_) tick();
+  while (!finished_) advance();
+}
+
+void MarketSim::advance() {
+  while (replay_next_ < replay_log_.size() && replay_log_[replay_next_].tick <= ticks_)
+    apply(replay_log_[replay_next_++]);
+  tick();
+  // Actions logged after expiry are rejected, but still part of the record.
+  if (finished_)
+    while (replay_next_ < replay_log_.size()) apply(replay_log_[replay_next_++]);
 }
 
 std::int64_t MarketSim::regime_fp() const {
@@ -167,6 +184,7 @@ void MarketSim::tick() {
     max_dd_ = std::max(max_dd_, peak_equity_ - eq);
     if (now_ >= next_second_) {
       equity_curve_.push_back(eq);
+      fv_curve_.push_back(fv_.value());
       events_last_second_ = ex_.events().total() - events_at_second_;
       events_at_second_ = ex_.events().total();
       next_second_ += 1'000'000;
@@ -227,13 +245,8 @@ void MarketSim::apply(const PlayerAction& a) {
 }
 
 std::uint64_t MarketSim::replay(std::uint64_t seed, const GameConfig& cfg, const std::vector<PlayerAction>& log) {
-  MarketSim sim(seed, cfg);
-  std::size_t i = 0;
-  while (!sim.finished()) {
-    while (i < log.size() && log[i].tick == sim.ticks()) sim.apply(log[i++]);
-    sim.tick();
-  }
-  while (i < log.size()) sim.apply(log[i++]);  // actions after expiry are rejected, but still recorded
+  MarketSim sim(seed, cfg, log);
+  sim.run_to_end();
   return sim.exchange().events().hash();
 }
 
