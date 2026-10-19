@@ -102,6 +102,7 @@ void Exchange::liquidate(ParticipantId p) {
   if (!a.liquidating) {
     emit({.price = mark(), .value = equity(p), .qty = a.position, .participant = p, .type = EventType::MarginCall});
     a.liquidating = true;
+    ++a.liquidations;
     book_.cancel_all(p, CancelReason::Risk);
     emit({.qty = a.position, .participant = p, .type = EventType::Liquidation});
   }
@@ -184,6 +185,7 @@ void Exchange::on_trade(const Order& maker, OrderId taker_id, ParticipantId take
   if (maker.qty == 0 && m.risk_checked) untrack(maker.id);
 
   last_trade_ = price;
+  signed_volume_ += signed_qty(aggressor, qty);
   ++stats_.trades;
   stats_.contracts += static_cast<std::uint64_t>(qty);
   if (vwap_start_ >= 0 && now_ >= vwap_start_) {

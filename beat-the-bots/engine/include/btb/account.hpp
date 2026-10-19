@@ -31,6 +31,9 @@ struct Account {
   Qty open_sell = 0;  // resting sell quantity
   std::uint32_t fills = 0;
   std::uint32_t volume = 0;
+  std::uint32_t closes = 0;          // fills that reduced the position
+  std::uint32_t winning_closes = 0;  // ... at a gross profit
+  std::uint32_t liquidations = 0;
   bool risk_checked = false;  // pre-trade checks + liquidation apply
   bool liquidating = false;
 
@@ -41,9 +44,12 @@ struct Account {
       open_cost += static_cast<std::int64_t>(q) * x;  // opening or adding
     } else if (std::abs(q) <= std::abs(pos)) {
       // Reducing: release the closed fraction of the cost basis.
-      open_cost -= open_cost * std::abs(q) / std::abs(pos);
+      const std::int64_t released = open_cost * std::abs(q) / std::abs(pos);
+      record_close(-static_cast<std::int64_t>(q) * x - released);
+      open_cost -= released;
     } else {
-      // Flipping through zero: the new position is entirely at x.
+      // Flipping through zero: close everything, the new position is at x.
+      record_close(static_cast<std::int64_t>(pos) * x - open_cost);
       open_cost = static_cast<std::int64_t>(pos + q) * x;
     }
     position = pos + q;
@@ -53,8 +59,14 @@ struct Account {
     volume += static_cast<std::uint32_t>(std::abs(q));
   }
 
+  void record_close(std::int64_t gross_ticks) {
+    ++closes;
+    if (gross_ticks > 0) ++winning_closes;
+  }
+
   // Cash-settles the open position at `price`; no fee.
   void settle(Price price) {
+    if (position != 0) record_close(static_cast<std::int64_t>(position) * price - open_cost);
     cash_ticks += static_cast<std::int64_t>(position) * price;
     position = 0;
     open_cost = 0;

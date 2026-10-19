@@ -70,11 +70,14 @@ class Exchange final : private MatchListener {
   const ContractSpec& spec() const { return spec_; }
   const RiskEngine& risk() const { return risk_; }
   EventRing& events() { return events_; }
+  const EventRing& events() const { return events_; }
   const ExchangeStats& stats() const { return stats_; }
 
   Price mark() const;
   bool has_last_trade() const { return last_trade_ > 0; }
   Price last_trade() const { return last_trade_; }
+  // Cumulative aggressor-signed volume (buys +, sells -), public tape data.
+  std::int64_t signed_volume() const { return signed_volume_; }
   Cents equity(ParticipantId p) const;
   Cents total_pnl(ParticipantId p) const { return accounts_[p].total_pnl(mark(), spec_.tick_value); }
 
@@ -118,6 +121,7 @@ class Exchange final : private MatchListener {
   Price initial_price_;
   Price last_trade_ = 0;
   Price settlement_px_ = 0;
+  std::int64_t signed_volume_ = 0;
   bool closed_ = false;
   bool in_liquidation_ = false;
 

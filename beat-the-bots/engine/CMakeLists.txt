@@ -19,6 +19,12 @@ add_library(btb_engine STATIC
   src/types.cpp
   src/order_book.cpp
   src/exchange.cpp
+  src/json.cpp
+  src/config.cpp
+  src/fair_value.cpp
+  src/news.cpp
+  src/bots.cpp
+  src/market_sim.cpp
 )
 target_include_directories(btb_engine PUBLIC include)
 target_compile_options(btb_engine PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
@@ -29,6 +35,9 @@ endif()
 if(EMSCRIPTEN)
   return()  # the wasm target is added in a later milestone
 endif()
+
+add_executable(btb_cli cli/main.cpp)
+target_link_libraries(btb_cli PRIVATE btb_engine)
 
 include(FetchContent)
 
@@ -44,6 +53,7 @@ if(BTB_BUILD_TESTS)
     tests/test_order_book.cpp
     tests/test_flat_map.cpp
     tests/test_exchange.cpp
+    tests/test_market_sim.cpp
   )
   target_link_libraries(btb_tests PRIVATE btb_engine Catch2::Catch2WithMain)
   enable_testing()
