@@ -18,6 +18,7 @@ option(BTB_WERROR "Treat warnings as errors" OFF)
 add_library(btb_engine STATIC
   src/types.cpp
   src/order_book.cpp
+  src/exchange.cpp
 )
 target_include_directories(btb_engine PUBLIC include)
 target_compile_options(btb_engine PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
@@ -42,6 +43,7 @@ if(BTB_BUILD_TESTS)
   add_executable(btb_tests
     tests/test_order_book.cpp
     tests/test_flat_map.cpp
+    tests/test_exchange.cpp
   )
   target_link_libraries(btb_tests PRIVATE btb_engine Catch2::Catch2WithMain)
   enable_testing()
