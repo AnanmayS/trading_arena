@@ -6,7 +6,7 @@
 
 ![Beat the Bots gameplay](docs/demo.gif)
 
-You get a $25,000 account and five minutes. Market makers quote the book, momentum traders chase moves, mean-reversion traders fade them, noise traders add liquidity, and one informed trader can see where the price is really going. Headlines land a moment before the market digests them: read fast, trade the order book, and don't get liquidated. When the clock runs out the contract cash-settles and you see how many bots you beat. Every round is a seed, so a link like `?seed=4242&diff=hard` replays the exact same market for anyone.
+You get a $25,000 account and five minutes. Market makers quote the book, momentum traders chase moves, mean-reversion traders fade them, noise traders add liquidity, and one informed trader can see where the price is really going. Headlines land a moment before the market digests them: read fast, trade the order book, and don't get liquidated. When the clock runs out the contract cash-settles and the end screen shows why: the hidden fair value plotted against the traded price, every headline on the charts, how your fills compared with fair value, results per bot type, and a sped-up replay of your round. Every round is a seed, so a link like `?seed=4242&diff=hard` replays the exact same market for anyone.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Each animation frame makes two calls into WASM: `step(ms)`, then `refresh()`. `r
 
 **No floating point in the engine at all.** The fair-value random walk, its stochastic volatility and the Gaussian sampler (Irwin–Hall over 16-bit uniforms) are 16.16 fixed point. The payoff is cross-platform determinism by construction. FMA contraction and libm differences can't make the native and WASM builds disagree.
 
-**Determinism.** One seed is split (splitmix64) into independent xoshiro256\*\* streams for fair value, news, scheduling and each bot. The UI advances wall-clock milliseconds, but the engine only moves in whole 25 ms ticks, and every player action is stamped with the tick count it happened after. `MarketSim::replay(seed, config, actions)` reproduces the event stream exactly. Every event is folded into a running FNV-1a hash; CI checks that `btb_cli --selftest` (native) and `web/scripts/determinism.mjs` (WASM) print identical hashes for 12 scripted rounds.
+**Determinism.** One seed is split (splitmix64) into independent xoshiro256\*\* streams for fair value, news, scheduling and each bot. The UI advances wall-clock milliseconds, but the engine only moves in whole 25 ms ticks, and every player action is stamped with the tick count it happened after. `MarketSim::replay(seed, config, actions)` reproduces the event stream exactly; the end screen's "Watch replay" builds a replay `MarketSim` from the same log and plays it at 4x or 8x. The hidden fair-value series only leaves the engine in the summary, once the round is settled. Every event is folded into a running FNV-1a hash; CI checks that `btb_cli --selftest` (native) and `web/scripts/determinism.mjs` (WASM) print identical hashes for 12 scripted rounds.
 
 **Zero-sum, enforced.** Every fill adds −q·x to the buyer's cash and +q·x to the seller's, so Σ P&L + Σ fees = 0 and net open interest = 0 at every instant. A property test checks this after every single operation across 25 seeds × 10,000 random operations (including liquidations), and again after every tick of 30 full rounds over every difficulty and scenario.
 

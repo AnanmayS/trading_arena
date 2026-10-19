@@ -59,3 +59,41 @@ test('the game works with storage disabled', async ({ page }) => {
   await expect(page.getByText('+1 LONG')).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Round results' })).toBeVisible({ timeout: 45_000 });
 });
+
+test('watching the replay reproduces the round and its final P&L', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/?seed=99&diff=hard&t=15');
+  await page.getByRole('button', { name: 'PLAY', exact: true }).click();
+  await page.getByRole('button', { name: 'Skip' }).click();
+
+  await page.keyboard.press('b');
+  await expect(page.getByText('+1 LONG')).toBeVisible();
+  await page.keyboard.press('3');
+  await page.keyboard.press('b');
+  await expect(page.getByText('+4 LONG')).toBeVisible();
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('s');
+  await expect(page.getByText('+1 LONG')).toBeVisible();
+
+  const results = page.getByRole('dialog', { name: 'Round results' });
+  await expect(results).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('Price vs. the hidden fair value')).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Results by bot type' }).getByText('Insider')).toBeVisible();
+  const pnl = await results.getByText('Final P&L').locator('xpath=following-sibling::*[1]').textContent();
+  expect(pnl).toMatch(/\$/);
+
+  await results.getByRole('button', { name: 'Watch replay' }).click();
+  await expect(results).toBeHidden();
+  const bar = page.getByRole('status', { name: 'Replay' });
+  await expect(bar).toBeVisible();
+  await expect(page.getByRole('button', { name: /BUY MKT/ })).toBeDisabled();
+  await bar.getByRole('radio', { name: '8x' }).click();
+  // The replayed orders show up as fills without anyone clicking.
+  await expect(page.getByText('+4 LONG')).toBeVisible({ timeout: 10_000 });
+
+  await expect(results).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('replay-check')).toHaveText(/Replay reproduced your P&L exactly/);
+  await expect(results.getByText('Final P&L').locator('xpath=following-sibling::*[1]')).toHaveText(pnl!);
+  expect(errors).toEqual([]);
+});

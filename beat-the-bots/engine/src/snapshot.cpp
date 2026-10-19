@@ -114,7 +114,7 @@ std::string summary_json(const MarketSim& sim) {
   kv(s, "liquidations", r.liquidations);
   kv(s, "goalMet", r.goal_met ? 1 : 0);
   kv(s, "settlementPrice", r.settlement_price);
-  kv(s, "fairValue", r.final_fair_value);
+  if (sim.finished()) kv(s, "fairValue", r.final_fair_value);
 
   s += "\"bots\":[";
   bool first = true;
@@ -133,8 +133,62 @@ std::string summary_json(const MarketSim& sim) {
     first = false;
     s += std::to_string(e);
   }
-  s += "]}";
+  s += ']';
+  // The hidden value is the answer key: only reveal it once trading is over.
+  if (sim.finished()) {
+    s += ",\"fairValues\":[";
+    first = true;
+    for (const Price p : sim.fair_value_curve()) {
+      if (!first) s += ',';
+      first = false;
+      s += std::to_string(p);
+    }
+    s += ']';
+  }
+  s += '}';
   return s;
+}
+
+std::string actions_json(const std::vector<PlayerAction>& log) {
+  std::string s = "[";
+  for (std::size_t i = 0; i < log.size(); ++i) {
+    const PlayerAction& a = log[i];
+    if (i) s += ',';
+    const std::int64_t f[kActionFields] = {static_cast<std::int64_t>(a.tick), static_cast<std::int64_t>(a.kind),
+                                           static_cast<std::int64_t>(a.side), static_cast<std::int64_t>(a.type),
+                                           a.price, a.qty, static_cast<std::int64_t>(a.id)};
+    for (int k = 0; k < kActionFields; ++k) {
+      if (k) s += ',';
+      s += std::to_string(f[k]);
+    }
+  }
+  s += ']';
+  return s;
+}
+
+std::optional<std::vector<PlayerAction>> parse_actions(std::string_view text, std::string* error) {
+  auto fail = [&](const char* msg) -> std::optional<std::vector<PlayerAction>> {
+    if (error) *error = msg;
+    return std::nullopt;
+  };
+  const auto flat = json::parse_int_array(text, error);
+  if (!flat) return std::nullopt;
+  if (flat->size() % kActionFields) return fail("action log length is not a multiple of 7");
+  std::vector<PlayerAction> log;
+  log.reserve(flat->size() / kActionFields);
+  for (std::size_t i = 0; i < flat->size(); i += kActionFields) {
+    const std::int64_t* f = flat->data() + i;
+    if (f[0] < 0 || (!log.empty() && static_cast<std::uint64_t>(f[0]) < log.back().tick))
+      return fail("action ticks must be non-negative and in order");
+    if (f[1] < 0 || f[1] > static_cast<std::int64_t>(ActionKind::Flatten)) return fail("bad action kind");
+    if (f[2] < 0 || f[2] > static_cast<std::int64_t>(Side::Sell)) return fail("bad side");
+    if (f[3] < 0 || f[3] > static_cast<std::int64_t>(OrderType::IOC)) return fail("bad order type");
+    if (f[5] < 0 || f[5] > 1'000'000 || f[6] < 0) return fail("bad quantity or order id");
+    log.push_back({static_cast<std::uint64_t>(f[0]), static_cast<ActionKind>(f[1]), static_cast<Side>(f[2]),
+                   static_cast<OrderType>(f[3]), static_cast<Price>(f[4]), static_cast<Qty>(f[5]),
+                   static_cast<OrderId>(f[6])});
+  }
+  return log;
 }
 
 std::string catalog_json() {

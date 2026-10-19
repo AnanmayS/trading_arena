@@ -20,6 +20,7 @@ const summary = (pnl: number, seed = 1): RoundSummary => ({
   fairValue: 20000,
   bots: [],
   equity: [],
+  fairValues: [],
 });
 
 afterEach(() => {

@@ -7,6 +7,7 @@
 #include "btb/fair_value.hpp"
 #include "btb/market_sim.hpp"
 #include "btb/news.hpp"
+#include "btb/snapshot.hpp"
 
 using namespace btb;
 
@@ -137,6 +138,49 @@ TEST_CASE("replaying the player's action log reproduces the round exactly") {
     REQUIRE(live.action_log().size() > 20);
     CHECK(MarketSim::replay(seed, cfg, live.action_log()) == live.exchange().events().hash());
   }
+}
+
+TEST_CASE("a replay sim stepped like the UI matches the live round, P&L included") {
+  const GameConfig cfg = short_round(Difficulty::Normal, Scenario::None, 30);
+  MarketSim live(11, cfg);
+  play_randomly(live, 99);
+  REQUIRE(live.action_log().size() > 10);
+
+  // Round-trip the log through its JSON form, as the browser does.
+  const auto log = snapshot::parse_actions(snapshot::actions_json(live.action_log()));
+  REQUIRE(log);
+  REQUIRE(log->size() == live.action_log().size());
+
+  MarketSim replay(11, cfg, *log);
+  CHECK(replay.replaying());
+  Rng frames(5);
+  while (!replay.finished()) replay.step(static_cast<std::uint32_t>(frames.range(16, 400)));  // 4x-8x speed frames
+  CHECK(replay.exchange().events().hash() == live.exchange().events().hash());
+  CHECK(replay.summary().pnl == live.summary().pnl);
+  CHECK(replay.action_log().size() == live.action_log().size());
+  CHECK(snapshot::summary_json(replay) == snapshot::summary_json(live));
+}
+
+TEST_CASE("action log JSON rejects malformed input") {
+  std::string err;
+  CHECK(snapshot::parse_actions("[]")->empty());
+  CHECK_FALSE(snapshot::parse_actions("[1,2,3]", &err));
+  CHECK_FALSE(snapshot::parse_actions("[5,0,0,1,0,1,0, 4,0,0,1,0,1,0]", &err));  // out of order
+  CHECK(err.find("order") != std::string::npos);
+  CHECK_FALSE(snapshot::parse_actions("[0,9,0,1,0,1,0]", &err));
+  CHECK_FALSE(snapshot::parse_actions("{}", &err));
+}
+
+TEST_CASE("fair value series: one sample per second, withheld until the round ends") {
+  MarketSim sim(21, short_round(Difficulty::Normal, Scenario::None, 20));
+  sim.run_ticks(200);
+  CHECK(snapshot::summary_json(sim).find("fairValues") == std::string::npos);
+  CHECK(snapshot::summary_json(sim).find("fairValue") == std::string::npos);
+  sim.run_to_end();
+  const auto& fv = sim.fair_value_curve();
+  CHECK(fv.size() == 21);
+  CHECK(fv.back() == sim.fair_value());
+  CHECK(snapshot::summary_json(sim).find("\"fairValues\":[") != std::string::npos);
 }
 
 TEST_CASE("full rounds stay zero-sum after every tick (difficulties x scenarios x seeds)") {

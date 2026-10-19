@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { BtbModule } from '../engine/wasm/btb.js';
 import type { Catalog, GameOptions } from '../engine/engine';
-import { GameController } from '../game/controller';
+import { GameController, REPLAY_SPEEDS } from '../game/controller';
 import { useFrame, useMediaQuery, usePrefs } from '../game/hooks';
 import { Controls } from './Controls';
 import { BreakingNews, Headlines } from './Headlines';
@@ -19,7 +19,10 @@ interface Props {
   catalog: Catalog;
   options: GameOptions;
   tutorial: boolean;
+  /** Re-plays a finished round (read-only) instead of starting a live one. */
+  replay?: { log: string; pnl: number };
   onTutorialDone: () => void;
+  onWatchReplay: (log: string, pnl: number) => void;
   onReplay: () => void;
   onNew: () => void;
   onQuit: () => void;
@@ -29,26 +32,37 @@ type Tab = 'ladder' | 'chart' | 'tape' | 'news';
 
 export function GameScreen(props: Props) {
   const [ctrl, setCtrl] = useState<GameController | null>(null);
-  const { mod, catalog, options } = props;
+  const { mod, catalog, options, replay } = props;
 
   // The controller owns WASM memory, so it is created and disposed with the
   // effect (React StrictMode mounts twice in development).
   useEffect(() => {
-    const c = new GameController(mod, catalog, options);
+    const c = new GameController(mod, catalog, options, replay?.log);
     setCtrl(c);
     c.start();
     return () => c.dispose();
-  }, [mod, catalog, options]);
+  }, [mod, catalog, options, replay]);
 
   if (!ctrl) return null;
   return <Game ctrl={ctrl} {...props} />;
 }
 
-function Game({ ctrl, catalog, options, tutorial, onTutorialDone, onReplay, onNew, onQuit }: Props & { ctrl: GameController }) {
+function Game({
+  ctrl,
+  catalog,
+  options,
+  tutorial,
+  replay,
+  onTutorialDone,
+  onWatchReplay,
+  onReplay,
+  onNew,
+  onQuit,
+}: Props & { ctrl: GameController }) {
   useFrame(ctrl);
   const [prefs, setPrefs] = usePrefs();
   const [tab, setTab] = useState<Tab>('ladder');
-  const [showTutorial, setShowTutorial] = useState(tutorial);
+  const [showTutorial, setShowTutorial] = useState(tutorial && !replay);
   const desktop = useMediaQuery('(min-width: 1024px)');
   const size = prefs.size;
   const goal = catalog.scenarios.find((s) => s.key === options.scenario)?.goal;
@@ -83,6 +97,7 @@ function Game({ ctrl, catalog, options, tutorial, onTutorialDone, onReplay, onNe
   return (
     <div className="flex h-full flex-col">
       <TopBar ctrl={ctrl} prefs={prefs} setPrefs={setPrefs} onQuit={onQuit} goal={goal} />
+      {ctrl.replay && <ReplayBar ctrl={ctrl} />}
 
       {desktop ? (
       /* Desktop: chart | ladder | tape + news, with position and controls below. */
@@ -146,8 +161,45 @@ function Game({ ctrl, catalog, options, tutorial, onTutorialDone, onReplay, onNe
         />
       )}
       {ctrl.summary && (
-        <Summary ctrl={ctrl} summary={ctrl.summary} goal={goal} onReplay={onReplay} onNew={onNew} onMenu={onQuit} />
+        <Summary
+          ctrl={ctrl}
+          summary={ctrl.summary}
+          goal={goal}
+          replayOf={replay?.pnl}
+          onWatchReplay={() => {
+            const s = ctrl.summary!;
+            onWatchReplay(replay?.log ?? ctrl.actionLog ?? '[]', replay?.pnl ?? s.pnl);
+          }}
+          onReplay={onReplay}
+          onNew={onNew}
+          onMenu={onQuit}
+        />
       )}
+    </div>
+  );
+}
+
+/** Shown while a finished round re-plays itself: speed control, no trading. */
+function ReplayBar({ ctrl }: { ctrl: GameController }) {
+  useFrame(ctrl);
+  return (
+    <div className="flex items-center gap-3 border-b border-accent/50 bg-panel-2 px-4 py-1.5 text-sm" role="status" aria-label="Replay">
+      <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-bg">REPLAY</span>
+      <span className="text-muted">Watching your round again. Trading is off; your orders replay exactly as you placed them.</span>
+      <div className="ml-auto flex items-center gap-1" role="radiogroup" aria-label="Replay speed">
+        {REPLAY_SPEEDS.map((sp) => (
+          <button
+            key={sp}
+            type="button"
+            role="radio"
+            aria-checked={ctrl.speed === sp}
+            onClick={() => ctrl.setSpeed(sp)}
+            className={`num rounded px-2 py-0.5 text-xs ${ctrl.speed === sp ? 'bg-text font-bold text-bg' : 'text-muted hover:text-text'}`}
+          >
+            {sp}x
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

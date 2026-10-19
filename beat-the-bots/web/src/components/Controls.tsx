@@ -17,7 +17,7 @@ function Key({ k }: { k: string }) {
 export function Controls({ ctrl, size, onSize }: Props) {
   useFrame(ctrl);
   const f = ctrl.frame;
-  const closed = f.finished || ctrl.paused;
+  const closed = f.finished || ctrl.paused || ctrl.replay;
   const working = f.orders.length;
 
   return (

@@ -10,24 +10,15 @@ import {
   type ISeriesApi,
   type SeriesMarker,
   type Time,
-  type UTCTimestamp,
 } from 'lightweight-charts';
 import type { GameController } from '../game/controller';
 import { cssVar } from '../game/hooks';
 import { Side } from '../engine/layout';
+import { attachHeadlineTooltip, clock, headlineMarkers, sortMarkers, toTime } from './chartHeadlines';
 
-// 1-second candles with the player's fills as markers, the average entry price
-// and the liquidation price as horizontal lines. Updates are incremental: only
-// the newest candle is pushed each frame.
-
-// lightweight-charts wants epoch seconds; round seconds are offset onto a
-// fixed base and formatted back to mm:ss.
-const BASE = 1_700_000_000;
-const toTime = (sec: number) => (BASE + sec) as UTCTimestamp;
-const clock = (t: Time) => {
-  const s = Math.max(0, (t as number) - BASE);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-};
+// 1-second candles with the player's fills and the headlines as markers, the
+// average entry price and the liquidation price as horizontal lines. Updates
+// are incremental: only the newest candle is pushed each frame.
 
 export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: string }) {
   const el = useRef<HTMLDivElement>(null);
@@ -70,6 +61,8 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
     let liqLine: IPriceLine | null = null;
     let sent = 0;
     let fillCount = 0;
+    let newsCount = 0;
+    const untip = attachHeadlineTooltip(chart, el.current!, () => ctrl.headlines);
 
     const toBar = (c: (typeof ctrl.candles.candles)[number]) => ({
       time: toTime(c.time),
@@ -101,8 +94,9 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
         sent = cs.length;
       }
 
-      if (ctrl.fills.length !== fillCount) {
+      if (ctrl.fills.length !== fillCount || ctrl.headlines.length !== newsCount) {
         fillCount = ctrl.fills.length;
+        newsCount = ctrl.headlines.length;
         const ms: SeriesMarker<Time>[] = ctrl.fills.map((f) => ({
           time: toTime(Math.floor(f.timeUs / 1_000_000)),
           position: f.side === Side.Buy ? 'belowBar' : 'aboveBar',
@@ -110,7 +104,9 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
           color: f.side === Side.Buy ? colors.buy : colors.sell,
           text: `${f.side === Side.Buy ? 'B' : 'S'}${f.qty}`,
         }));
-        markers.setMarkers(ms);
+        // Mid-round the headline markers stay neutral: reading them is the game.
+        ms.push(...headlineMarkers(ctrl.headlines, () => colors.accent));
+        markers.setMarkers(sortMarkers(ms));
       }
 
       const f = ctrl.frame;
@@ -124,6 +120,7 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
     const unsub = ctrl.subscribe(update);
     return () => {
       unsub();
+      untip();
       chart.remove();
     };
   }, [ctrl, palette]);
@@ -132,9 +129,9 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
     <div className="panel flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
         <span className="panel-title">BTB · 1s candles</span>
-        <span className="text-[11px] text-muted">▲▼ your fills · AVG entry · LIQ liquidation</span>
+        <span className="text-[11px] text-muted">▲▼ your fills · N headline · AVG entry · LIQ liquidation</span>
       </div>
-      <div ref={el} className="min-h-0 flex-1" />
+      <div ref={el} className="relative min-h-0 flex-1" data-testid="price-chart" />
     </div>
   );
 }
