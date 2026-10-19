@@ -25,6 +25,7 @@ add_library(btb_engine STATIC
   src/news.cpp
   src/bots.cpp
   src/market_sim.cpp
+  src/snapshot.cpp
 )
 target_include_directories(btb_engine PUBLIC include)
 target_compile_options(btb_engine PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
@@ -32,8 +33,23 @@ if(BTB_WERROR)
   target_compile_options(btb_engine PRIVATE -Werror)
 endif()
 
+# ---------------------------------------------------------------- wasm module
 if(EMSCRIPTEN)
-  return()  # the wasm target is added in a later milestone
+  add_executable(btb_wasm wasm/bindings.cpp)
+  target_link_libraries(btb_wasm PRIVATE btb_engine)
+  set_target_properties(btb_wasm PROPERTIES OUTPUT_NAME btb SUFFIX ".js")
+  target_link_options(btb_wasm PRIVATE
+    -O3
+    -lembind
+    -sMODULARIZE=1
+    -sEXPORT_ES6=1
+    -sEXPORT_NAME=createBtbModule
+    -sALLOW_MEMORY_GROWTH=1
+    -sINITIAL_MEMORY=16MB
+    -sENVIRONMENT=web,worker,node
+    -sFILESYSTEM=0
+    -sEXPORTED_RUNTIME_METHODS=HEAPU8)
+  return()
 endif()
 
 add_executable(btb_cli cli/main.cpp)

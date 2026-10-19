@@ -3,6 +3,8 @@
 //
 //   btb_cli [--seed N] [--difficulty easy|normal|hard] [--scenario KEY]
 //           [--seconds N] [--player none|random] [--headlines]
+//   btb_cli --selftest   prints determinism hashes for a fixed matrix of rounds;
+//                        web/scripts/determinism.mjs prints the same from WASM.
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
@@ -13,6 +15,7 @@
 
 #include "btb/market_sim.hpp"
 #include "btb/news.hpp"
+#include "btb/snapshot.hpp"
 
 using namespace btb;
 
@@ -42,7 +45,25 @@ std::string points(Price ticks) {
 
 }  // namespace
 
+// Must match the matrix in web/scripts/determinism.mjs.
+int selftest() {
+  const char* configs[] = {
+      R"({"difficulty":"normal","round_seconds":60})",
+      R"({"difficulty":"hard","round_seconds":60})",
+      R"({"difficulty":"easy","scenario":"flash_crash","round_seconds":90})",
+      R"({"difficulty":"normal","scenario":"news_day","round_seconds":60})",
+  };
+  for (const std::uint64_t seed : {1ull, 42ull, 1987ull}) {
+    for (const char* c : configs) {
+      const auto cfg = parse_config(c);
+      std::printf("%" PRIu64 " %s %016" PRIx64 "\n", seed, c, snapshot::self_test(seed, *cfg));
+    }
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc == 2 && !std::strcmp(argv[1], "--selftest")) return selftest();
   std::uint64_t seed = 42;
   std::string difficulty = "normal", scenario = "none", player = "none";
   int seconds = 300;

@@ -33,7 +33,7 @@ struct ExchangeStats {
 class Exchange final : private MatchListener {
  public:
   Exchange(const ContractSpec& spec, Price initial_price, EventFilter filter = {},
-           std::uint32_t max_orders = 1u << 17);
+           std::uint32_t max_orders = 1u << 15);
 
   Exchange(const Exchange&) = delete;
   Exchange& operator=(const Exchange&) = delete;

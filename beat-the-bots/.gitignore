@@ -5,5 +5,3 @@ web/node_modules/
 web/dist/
 web/test-results/
 web/playwright-report/
-# generated wasm module (built by scripts/build_wasm.sh)
-web/src/engine/wasm/

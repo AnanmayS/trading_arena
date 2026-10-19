@@ -64,7 +64,7 @@ class EventRing {
       ++tail_;
       ++dropped_;
     }
-    buf_[head_ & mask_] = e;
+    buf_[static_cast<std::size_t>(head_ & mask_)] = e;
     ++head_;
     const auto* bytes = reinterpret_cast<const std::uint8_t*>(&e);
     for (std::size_t i = 0; i < sizeof(Event); ++i) hash_ = (hash_ ^ bytes[i]) * 0x100000001B3ull;
@@ -73,7 +73,7 @@ class EventRing {
   // Copies up to `max` pending events into `out`, oldest first.
   std::uint32_t drain(Event* out, std::uint32_t max) {
     std::uint32_t n = 0;
-    while (tail_ != head_ && n < max) out[n++] = buf_[tail_++ & mask_];
+    while (tail_ != head_ && n < max) out[n++] = buf_[static_cast<std::size_t>(tail_++ & mask_)];
     return n;
   }
 
