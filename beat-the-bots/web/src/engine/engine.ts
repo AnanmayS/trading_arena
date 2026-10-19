@@ -7,12 +7,14 @@
 import createBtbModule, { type BtbModule, type WasmEngine, type WasmStats } from './wasm/btb.js';
 import {
   ASKS_OFFSET,
+  OrderType,
   BIDS_OFFSET,
   EVENT_SIZE,
   EventField,
   FRAME_SIZE,
   FRAME_VERSION,
   ORDERS_OFFSET,
+  STOPS_OFFSET,
   Slot,
   type EventTypeCode,
   type OrderTypeCode,
@@ -29,7 +31,7 @@ export interface BookLevel {
 export interface WorkingOrder {
   id: number;
   side: SideCode;
-  price: number;
+  price: number; // limit price, or trigger price for a stop
   qty: number;
 }
 
@@ -66,6 +68,7 @@ export interface Frame {
   bids: BookLevel[];
   asks: BookLevel[];
   orders: WorkingOrder[];
+  stops: WorkingOrder[];
 }
 
 export interface EngineEvent {
@@ -166,6 +169,11 @@ export class BtbEngine {
   submit(side: SideCode, type: OrderTypeCode, priceTicks: number, qty: number): number {
     return this.wasm.submit(side, type, priceTicks, qty);
   }
+  /** Stop-market: fires a market order once the last trade reaches `triggerTicks`. */
+  submitStop(side: SideCode, triggerTicks: number, qty: number): number {
+    return this.wasm.submit(side, OrderType.Stop, triggerTicks, qty);
+  }
+  /** Cancels a resting order or a working stop. */
   cancel(id: number): boolean {
     return this.wasm.cancel(id);
   }
@@ -221,12 +229,14 @@ export class BtbEngine {
       }
       return out;
     };
-    const orderCount = at(Slot.OrderCount);
-    const orders: WorkingOrder[] = new Array(orderCount);
-    for (let i = 0; i < orderCount; i++) {
-      const b = ORDERS_OFFSET + i * 4;
-      orders[i] = { id: at(b), side: at(b + 1) as SideCode, price: at(b + 2), qty: at(b + 3) };
-    }
+    const working = (offset: number, count: number): WorkingOrder[] => {
+      const out: WorkingOrder[] = new Array(count);
+      for (let i = 0; i < count; i++) {
+        const b = offset + i * 4;
+        out[i] = { id: at(b), side: at(b + 1) as SideCode, price: at(b + 2), qty: at(b + 3) };
+      }
+      return out;
+    };
     const nonZero = (v: number) => (v === 0 ? null : v);
 
     return {
@@ -261,7 +271,8 @@ export class BtbEngine {
       liquidations: at(Slot.Liquidations),
       bids: levels(BIDS_OFFSET, at(Slot.BidCount)),
       asks: levels(ASKS_OFFSET, at(Slot.AskCount)),
-      orders,
+      orders: working(ORDERS_OFFSET, at(Slot.OrderCount)),
+      stops: working(STOPS_OFFSET, at(Slot.StopCount)),
     };
   }
 

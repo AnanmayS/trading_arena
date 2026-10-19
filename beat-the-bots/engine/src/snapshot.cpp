@@ -77,6 +77,19 @@ void write(const MarketSim& sim, Frame& f) {
     ++n;
   }
   f[OrderCount] = n;
+
+  int ns = 0;
+  for (const StopOrder& st : ex.stops()) {
+    if (st.owner != kPlayer) continue;
+    if (ns == kMaxStops) break;
+    const int base = kStopsOffset + ns * 4;
+    f[base] = static_cast<std::int64_t>(st.id);
+    f[base + 1] = static_cast<std::int64_t>(st.side);
+    f[base + 2] = st.trigger;
+    f[base + 3] = st.qty;
+    ++ns;
+  }
+  f[StopCount] = ns;
 }
 
 namespace {
@@ -161,7 +174,7 @@ std::string catalog_json() {
     s += '}';
   }
   s += "],\"rejectReasons\":[";
-  for (int i = 0; i <= static_cast<int>(RejectReason::NoLiquidity); ++i) {
+  for (int i = 0; i <= static_cast<int>(RejectReason::TooManyStops); ++i) {
     if (i) s += ',';
     json::append_string(s, to_string(static_cast<RejectReason>(i)));
   }
@@ -180,9 +193,21 @@ std::uint64_t self_test(std::uint64_t seed, const GameConfig& cfg) {
   while (!sim.finished()) {
     if (rng.chance(1, 40)) {
       const Side side = rng.chance(1, 2) ? Side::Buy : Side::Sell;
-      switch (rng.below(5)) {
+      switch (rng.below(6)) {
         case 0:
         case 1: sim.player_submit(side, OrderType::Market, 0, static_cast<Qty>(rng.range(1, 3))); break;
+        case 5: {
+          // Protective stop a few ticks through the last trade, sometimes
+          // pulled again; the rest trigger, get cancelled or expire.
+          const Qty pos = sim.exchange().account(kPlayer).position;
+          if (pos == 0) break;
+          const Price last = sim.exchange().last_trade();
+          const Price gap = rng.range(1, 6);
+          const auto r = pos > 0 ? sim.player_submit(Side::Sell, OrderType::Stop, last - gap, pos)
+                                 : sim.player_submit(Side::Buy, OrderType::Stop, last + gap, -pos);
+          if (r.ok() && rng.chance(1, 4)) sim.player_cancel(r.id);
+          break;
+        }
         case 2: {
           const auto r = sim.player_submit(side, OrderType::Limit, sim.exchange().mark() + rng.range(-4, 4), 1);
           if (r.resting && rng.chance(1, 2)) sim.player_cancel(r.id);

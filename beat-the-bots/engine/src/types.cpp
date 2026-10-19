@@ -16,6 +16,8 @@ const char* to_string(RejectReason r) {
     case RejectReason::UnknownOrder: return "unknown order";
     case RejectReason::Liquidating: return "account liquidating";
     case RejectReason::NoLiquidity: return "no liquidity";
+    case RejectReason::StopPrice: return "stop price already reached";
+    case RejectReason::TooManyStops: return "too many stop orders";
   }
   return "?";
 }

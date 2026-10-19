@@ -155,6 +155,7 @@ void MarketSim::tick() {
     for (std::uint32_t i = static_cast<std::uint32_t>(order_.size()); i > 1; --i)
       std::swap(order_[i - 1], order_[sched_rng_.below(i)]);
     for (const std::uint32_t i : order_) bots_[i]->on_tick(view_, *sinks_[i]);
+    ex_.check_stops();
     ex_.check_margins();
 
     // 4. Bookkeeping: price history, equity, per-second stats.

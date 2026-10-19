@@ -11,7 +11,7 @@ import {
   type GameOptions,
   type RoundSummary,
 } from '../engine/engine';
-import { EventType, OrderType, PLAYER, Side, type SideCode } from '../engine/layout';
+import { CANCEL_FLAG_STOP, EventType, OrderType, PLAYER, Side, type SideCode } from '../engine/layout';
 import { ticksToPoints } from '../engine/format';
 import type { BtbModule } from '../engine/wasm/btb.js';
 import { CandleBuilder } from './candles';
@@ -164,6 +164,11 @@ export class GameController {
   limit(side: SideCode, price: number, qty: number): void {
     this.command(() => this.engine.submit(side, OrderType.Limit, price, qty));
   }
+  /** Stop-market at `trigger`: the engine fires it once the last trade gets there. */
+  stopOrder(side: SideCode, trigger: number, qty: number): void {
+    this.command(() => this.engine.submitStop(side, trigger, qty));
+  }
+  /** Cancels a resting order or a working stop. */
   cancel(id: number): void {
     this.command(() => this.engine.cancel(id));
   }
@@ -218,8 +223,18 @@ export class GameController {
           break;
         case EventType.Cancel:
           // User cancels are visible on the ladder; only explain the others.
-          if (e.participant === PLAYER && e.reason !== 0 && e.reason !== 2)
-            this.toast('info', `Order cancelled: ${this.catalog.cancelReasons[e.reason] ?? ''}`, now);
+          if (e.participant === PLAYER && e.reason !== 0 && e.reason !== 2) {
+            const what = e.flags & CANCEL_FLAG_STOP ? 'Stop' : 'Order';
+            this.toast('info', `${what} cancelled: ${this.catalog.cancelReasons[e.reason] ?? ''}`, now);
+          }
+          break;
+        case EventType.Trigger:
+          if (e.participant === PLAYER)
+            this.toast(
+              'info',
+              `Stop ${ticksToPoints(e.price)} hit: ${e.side === Side.Buy ? 'buying' : 'selling'} ${e.qty} at market`,
+              now,
+            );
           break;
         case EventType.MarginCall:
           if (e.participant === PLAYER) {

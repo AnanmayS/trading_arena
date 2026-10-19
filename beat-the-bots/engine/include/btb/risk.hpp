@@ -39,6 +39,20 @@ class RiskEngine {
     return RejectReason::None;
   }
 
+  // Checks for placing a stop. Stops deliberately do not count toward
+  // worst-case exposure or margin: a stop cannot fill until it triggers, and
+  // when it does it is submitted as a fresh market order that goes through
+  // pre_trade() against the account as it is at that moment. Counting stops
+  // up front would double-count the usual bracket (a take-profit limit plus a
+  // protective stop on the same position) and refuse protective stops exactly
+  // when the account is closest to its limits.
+  RejectReason pre_stop(const Account& a, const OrderRequest& req, Price mark) const {
+    if (a.liquidating) return RejectReason::Liquidating;
+    if (req.qty <= 0) return RejectReason::InvalidQty;
+    if (std::abs(req.price - mark) > spec_.price_band) return RejectReason::PriceBand;
+    return RejectReason::None;
+  }
+
   bool breaches_maintenance(const Account& a, Cents equity) const {
     return a.position != 0 && equity < maintenance_requirement(a);
   }

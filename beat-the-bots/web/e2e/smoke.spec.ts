@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// Load, play, trade, place and cancel a resting order, reach the end screen.
+// Load, play, trade, place and cancel a resting order and a stop, reach the end screen.
 // t=15 shortens the round to 15 simulated seconds.
 test('a first-time visitor can play a full (short) round', async ({ page }) => {
   const errors: string[] = [];
@@ -31,6 +31,16 @@ test('a first-time visitor can play a full (short) round', async ({ page }) => {
   await page.mouse.click(x, y);
   await expect(page.getByText('1 working')).toBeVisible();
   await page.mouse.click(x, y);
+  await expect(page.getByRole('button', { name: /^CANCEL ALL/ })).toBeDisabled();
+
+  // Shift-click the ask side of the bottom row: a protective sell stop below
+  // the market. Clicking it again cancels it.
+  const stopX = box.x + box.width * 0.92; // "my asks" column
+  await page.keyboard.down('Shift');
+  await page.mouse.click(stopX, y);
+  await page.keyboard.up('Shift');
+  await expect(page.getByText('· 1 stop')).toBeVisible();
+  await page.mouse.click(stopX, y);
   await expect(page.getByRole('button', { name: /^CANCEL ALL/ })).toBeDisabled();
 
   // Hotkeys: S sells back to flat.

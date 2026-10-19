@@ -12,6 +12,7 @@ Exchange::Exchange(const ContractSpec& spec, Price initial_price, EventFilter fi
       book_(BookConfig{initial_price, 8192, max_orders}),
       initial_price_(initial_price) {
   book_.set_listener(this);
+  stops_.reserve(kMaxStopsPerParticipant * 4);
 }
 
 ParticipantId Exchange::add_participant(bool risk_checked) {
@@ -37,6 +38,8 @@ SubmitResult Exchange::submit(ParticipantId who, OrderRequest req) {
     return {kNoOrder, RejectReason::RoundClosed, 0, 0};
   }
 
+  if (req.type == OrderType::Stop) return place_stop(who, req);
+
   Account& a = accounts_[who];
   if (a.risk_checked) {
     const Price m = mark();
@@ -61,12 +64,103 @@ SubmitResult Exchange::submit(ParticipantId who, OrderRequest req) {
     (req.side == Side::Buy ? a.open_buy : a.open_sell) += res.resting;
     if (a.risk_checked) tracked_.push_back(res.id);
   }
+  check_stops();
   check_margins();
   return res;
 }
 
+SubmitResult Exchange::place_stop(ParticipantId who, const OrderRequest& req) {
+  const Account& a = accounts_[who];
+  RejectReason r = RejectReason::None;
+  if (req.qty <= 0) r = RejectReason::InvalidQty;
+  else if (req.price <= 0) r = RejectReason::InvalidPrice;
+  else if (a.risk_checked) r = risk_.pre_stop(a, req, mark());
+  if (r == RejectReason::None) {
+    // A stop the market has already reached would trigger on placement; that
+    // is almost always a click on the wrong side of the ladder, so refuse it.
+    const Price ref = has_last_trade() ? last_trade_ : mark();
+    if (req.side == Side::Sell ? req.price >= ref : req.price <= ref) r = RejectReason::StopPrice;
+  }
+  if (r == RejectReason::None &&
+      std::count_if(stops_.begin(), stops_.end(), [&](const StopOrder& s) { return s.owner == who; }) >=
+          static_cast<std::ptrdiff_t>(kMaxStopsPerParticipant))
+    r = RejectReason::TooManyStops;
+  if (r != RejectReason::None) {
+    reject(who, req, r);
+    return {kNoOrder, r, 0, 0};
+  }
+
+  const StopOrder st{book_.allocate_id(), req.price, req.qty, who, req.side};
+  stops_.push_back(st);
+  if (wants_order_events(who))
+    emit({.price = st.trigger,
+          .order_id = st.id,
+          .qty = st.qty,
+          .participant = who,
+          .type = EventType::Ack,
+          .side = st.side,
+          .reason = static_cast<std::uint8_t>(OrderType::Stop)});
+  return {st.id, RejectReason::None, 0, 0};
+}
+
+void Exchange::check_stops() {
+  if (in_stops_ || closed_ || !has_last_trade()) return;
+  in_stops_ = true;
+  for (;;) {
+    // Rescan from the oldest stop each time: the market order below can move
+    // the last trade, and a liquidation inside it can cancel other stops.
+    const auto it = std::find_if(stops_.begin(), stops_.end(), [&](const StopOrder& st) {
+      return st.side == Side::Sell ? last_trade_ <= st.trigger : last_trade_ >= st.trigger;
+    });
+    if (it == stops_.end() || closed_) break;
+    const StopOrder st = *it;
+    stops_.erase(it);
+    if (wants_order_events(st.owner))
+      emit({.price = st.trigger,
+            .value = last_trade_,
+            .order_id = st.id,
+            .qty = st.qty,
+            .participant = st.owner,
+            .type = EventType::Trigger,
+            .side = st.side});
+    submit(st.owner, {st.owner, st.side, OrderType::Market, 0, st.qty});
+  }
+  in_stops_ = false;
+}
+
+std::uint32_t Exchange::cancel_stops(ParticipantId who, CancelReason reason) {
+  std::uint32_t n = 0;
+  for (const StopOrder& st : stops_) {
+    if (st.owner != who) continue;
+    emit_stop_cancel(st, reason);
+    ++n;
+  }
+  if (n) std::erase_if(stops_, [&](const StopOrder& st) { return st.owner == who; });
+  return n;
+}
+
+void Exchange::emit_stop_cancel(const StopOrder& st, CancelReason reason) {
+  if (!wants_order_events(st.owner)) return;
+  emit({.price = st.trigger,
+        .order_id = st.id,
+        .qty = st.qty,
+        .participant = st.owner,
+        .type = EventType::Cancel,
+        .side = st.side,
+        .reason = static_cast<std::uint8_t>(reason),
+        .flags = 2});
+}
+
 bool Exchange::cancel(ParticipantId who, OrderId id) {
   ++stats_.cancels;
+  if (const auto it = std::find_if(stops_.begin(), stops_.end(), [&](const StopOrder& st) { return st.id == id; });
+      it != stops_.end()) {
+    if (it->owner != who) return false;
+    const StopOrder st = *it;
+    stops_.erase(it);
+    emit_stop_cancel(st, CancelReason::User);
+    return true;
+  }
   const Order* o = book_.find(id);
   if (!o || o->owner != who) return false;
   return book_.cancel(id, CancelReason::User);
@@ -74,7 +168,8 @@ bool Exchange::cancel(ParticipantId who, OrderId id) {
 
 std::uint32_t Exchange::cancel_all(ParticipantId who, CancelReason reason) {
   ++stats_.cancels;
-  return book_.cancel_all(who, reason);
+  const std::uint32_t n = book_.cancel_all(who, reason);
+  return n + cancel_stops(who, reason);
 }
 
 SubmitResult Exchange::flatten(ParticipantId who) {
@@ -104,6 +199,7 @@ void Exchange::liquidate(ParticipantId p) {
     a.liquidating = true;
     ++a.liquidations;
     book_.cancel_all(p, CancelReason::Risk);
+    cancel_stops(p, CancelReason::Risk);
     emit({.qty = a.position, .participant = p, .type = EventType::Liquidation});
   }
   if (a.position != 0) {
@@ -124,7 +220,10 @@ Price Exchange::settlement_price() const {
 Price Exchange::settle() {
   if (closed_) return settlement_px_;
   const Price px = settlement_price();
-  for (ParticipantId p = 0; p < accounts_.size(); ++p) book_.cancel_all(p, CancelReason::Expiry);
+  for (ParticipantId p = 0; p < accounts_.size(); ++p) {
+    book_.cancel_all(p, CancelReason::Expiry);
+    cancel_stops(p, CancelReason::Expiry);
+  }
   settlement_px_ = px;
   closed_ = true;
   for (ParticipantId p = 0; p < accounts_.size(); ++p) {

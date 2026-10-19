@@ -36,6 +36,7 @@ export function PositionPanel({ ctrl }: { ctrl: GameController }) {
           <div>fees paid {centsToDollars(f.fees)}</div>
           <div>
             {f.fills} fill{f.fills === 1 ? '' : 's'} · {f.orders.length} working
+            {f.stops.length > 0 && ` · ${f.stops.length} stop${f.stops.length === 1 ? '' : 's'}`}
           </div>
         </div>
       </div>

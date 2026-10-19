@@ -33,7 +33,7 @@ const STEPS: Step[] = [
   {
     target: 'margin',
     title: "Don't get liquidated",
-    body: 'If losses eat into your margin this bar turns red, and at 100% the exchange closes your position for you. Beat the bots before the clock runs out.',
+    body: 'If losses eat into your margin this bar turns red, and at 100% the exchange closes your position for you. Protect a trade with a stop: Shift-click the book (or switch on STOP) and it trades at market once the price gets there.',
     cta: 'Start trading',
   },
 ];

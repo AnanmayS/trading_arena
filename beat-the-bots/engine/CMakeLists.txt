@@ -70,6 +70,7 @@ if(BTB_BUILD_TESTS)
     tests/test_flat_map.cpp
     tests/test_exchange.cpp
     tests/test_market_sim.cpp
+    tests/test_stops.cpp
   )
   target_link_libraries(btb_tests PRIVATE btb_engine Catch2::Catch2WithMain)
   enable_testing()

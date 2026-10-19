@@ -16,8 +16,8 @@ import type { GameController } from '../game/controller';
 import { cssVar } from '../game/hooks';
 import { Side } from '../engine/layout';
 
-// 1-second candles with the player's fills as markers, the average entry price
-// and the liquidation price as horizontal lines. Updates are incremental: only
+// 1-second candles with the player's fills as markers, the average entry price,
+// the liquidation price and each working stop as horizontal lines. Updates are incremental: only
 // the newest candle is pushed each frame.
 
 // lightweight-charts wants epoch seconds; round seconds are offset onto a
@@ -68,6 +68,7 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
     const markers = createSeriesMarkers(series, []);
     let avgLine: IPriceLine | null = null;
     let liqLine: IPriceLine | null = null;
+    const stopLines = new Map<number, IPriceLine>();
     let sent = 0;
     let fillCount = 0;
 
@@ -118,6 +119,28 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
       const liq = f.position !== 0 && f.ticksToLiq >= 0 ? (f.mark - Math.sign(f.position) * f.ticksToLiq) / tpp : null;
       avgLine = setLine(avgLine, avg, colors.accent, 'AVG');
       liqLine = setLine(liqLine, liq, colors.danger, 'LIQ');
+
+      const live = new Set<number>();
+      for (const st of f.stops) {
+        live.add(st.id);
+        if (stopLines.has(st.id)) continue;
+        stopLines.set(
+          st.id,
+          series.createPriceLine({
+            price: st.price / tpp,
+            color: st.side === Side.Buy ? colors.buy : colors.sell,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `${st.side === Side.Buy ? 'BUY' : 'SELL'} STP ${st.qty}`,
+          }),
+        );
+      }
+      for (const [id, line] of stopLines) {
+        if (live.has(id)) continue;
+        series.removePriceLine(line);
+        stopLines.delete(id);
+      }
     };
 
     update();
@@ -132,7 +155,7 @@ export function PriceChart({ ctrl, palette }: { ctrl: GameController; palette: s
     <div className="panel flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
         <span className="panel-title">BTB · 1s candles</span>
-        <span className="text-[11px] text-muted">▲▼ your fills · AVG entry · LIQ liquidation</span>
+        <span className="text-[11px] text-muted">▲▼ your fills · AVG entry · LIQ liquidation · STP stops</span>
       </div>
       <div ref={el} className="min-h-0 flex-1" />
     </div>

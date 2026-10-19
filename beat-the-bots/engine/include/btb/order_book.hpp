@@ -101,6 +101,10 @@ class OrderBook {
   // Fills `out` with up to `max_levels` levels from the best price outward.
   std::uint32_t depth(Side side, LevelView* out, std::uint32_t max_levels) const;
 
+  // Hands out an id from the book's sequence without creating an order, so
+  // orders held outside the book (stops) share one id space with it.
+  OrderId allocate_id() { return next_id_++; }
+
   const Order* find(OrderId id) const;
   std::uint32_t order_count() const { return ids_.size(); }
   Price base() const { return base_; }
