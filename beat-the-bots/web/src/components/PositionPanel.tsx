@@ -39,7 +39,7 @@ export function PositionPanel({ ctrl }: { ctrl: GameController }) {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-x-4 gap-y-2 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2 min-[1400px]:grid-cols-6">
         <Stat label="Position">
           <span className={pos > 0 ? 'text-buy' : pos < 0 ? 'text-sell' : 'text-muted'}>
             {pos > 0 ? `+${pos} LONG` : pos < 0 ? `${pos} SHORT` : 'FLAT'}

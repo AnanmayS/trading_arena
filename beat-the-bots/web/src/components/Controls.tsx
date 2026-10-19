@@ -69,7 +69,7 @@ export function Controls({ ctrl, size, onSize }: Props) {
           type="button"
           disabled={closed || (f.position === 0 && working === 0)}
           onClick={() => ctrl.flatten()}
-          className="h-10 rounded-md border border-line bg-panel-2 text-[13px] font-semibold hover:border-muted"
+          className="h-10 whitespace-nowrap rounded-md border border-line bg-panel-2 text-[13px] font-semibold hover:border-muted"
         >
           FLATTEN
           <Key k="F" />
@@ -80,7 +80,7 @@ export function Controls({ ctrl, size, onSize }: Props) {
           onClick={() => ctrl.cancelAll()}
           className="h-10 rounded-md border border-line bg-panel-2 text-[13px] font-semibold hover:border-muted"
         >
-          CANCEL ALL{working ? ` (${working})` : ''}
+          CANCEL ALL
           <Key k="Esc" />
         </button>
       </div>

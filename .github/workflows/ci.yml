@@ -24,7 +24,7 @@ jobs:
             cxx: g++
             werror: OFF
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Configure
@@ -41,7 +41,7 @@ jobs:
           engine/build/btb_latency
       - name: Determinism hashes
         run: engine/build/btb_cli --selftest | tee native-hashes.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: matrix.compiler == 'clang'
         with:
           name: native-hashes
@@ -52,13 +52,13 @@ jobs:
     needs: native
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: beat-the-bots/web/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: native-hashes
           path: beat-the-bots
@@ -98,7 +98,7 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: playwright-report

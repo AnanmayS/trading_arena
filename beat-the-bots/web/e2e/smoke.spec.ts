@@ -29,7 +29,7 @@ test('a first-time visitor can play a full (short) round', async ({ page }) => {
   const x = box.x + box.width * 0.08; // "my bids" column
   const y = box.y + box.height - 15; // bottom row
   await page.mouse.click(x, y);
-  await expect(page.getByRole('button', { name: /CANCEL ALL \(1\)/ })).toBeVisible();
+  await expect(page.getByText('1 working')).toBeVisible();
   await page.mouse.click(x, y);
   await expect(page.getByRole('button', { name: /^CANCEL ALL/ })).toBeDisabled();
 
