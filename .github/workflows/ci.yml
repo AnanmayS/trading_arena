@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: beat-the-bots
+
+jobs:
+  native:
+    name: Native engine (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: clang
+            cxx: clang++
+            werror: ON
+          - compiler: gcc
+            cxx: g++
+            werror: OFF
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure
+        run: cmake -S engine -B engine/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DBTB_WERROR=${{ matrix.werror }}
+      - name: Build
+        run: cmake --build engine/build
+      - name: Unit, property and determinism tests
+        run: ctest --test-dir engine/build --output-on-failure
+      - name: Headless round
+        run: engine/build/btb_cli --seed 42 --player random --headlines
+      - name: Benchmarks (smoke)
+        run: |
+          engine/build/btb_bench --benchmark_min_time=0.05s
+          engine/build/btb_latency
+      - name: Determinism hashes
+        run: engine/build/btb_cli --selftest | tee native-hashes.txt
+      - uses: actions/upload-artifact@v4
+        if: matrix.compiler == 'clang'
+        with:
+          name: native-hashes
+          path: beat-the-bots/native-hashes.txt
+
+  web:
+    name: WASM + web
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: beat-the-bots/web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-hashes
+          path: beat-the-bots
+      - name: Install web dependencies
+        working-directory: beat-the-bots/web
+        run: npm ci
+      - name: Committed WASM module matches native engine
+        run: |
+          node web/scripts/determinism.mjs > wasm-hashes.txt
+          diff native-hashes.txt wasm-hashes.txt
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Rebuild WASM from source
+        run: ./scripts/build_wasm.sh
+      - name: Fresh WASM module matches native engine
+        run: |
+          node web/scripts/determinism.mjs > wasm-hashes.txt
+          diff native-hashes.txt wasm-hashes.txt
+      - name: Typecheck, unit and component tests
+        working-directory: beat-the-bots/web
+        run: |
+          npx tsc -b
+          npx vitest run
+      - name: Production build and size budget (< 2 MB gzipped)
+        working-directory: beat-the-bots/web
+        run: |
+          npx vite build
+          total=0
+          for f in $(find dist -type f); do total=$((total + $(gzip -c "$f" | wc -c))); done
+          echo "gzipped total: $total bytes"
+          test "$total" -lt 2097152
+      - name: Playwright smoke test
+        working-directory: beat-the-bots/web
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: beat-the-bots/web/test-results
