@@ -161,6 +161,34 @@ TEST_CASE("a replay sim stepped like the UI matches the live round, P&L included
   CHECK(snapshot::summary_json(replay) == snapshot::summary_json(live));
 }
 
+TEST_CASE("a round with stop orders replays exactly from its JSON action log") {
+  const GameConfig cfg = short_round(Difficulty::Hard, Scenario::None, 40);
+  MarketSim live(21, cfg);
+  Rng rng(3);
+  int stops = 0;
+  while (!live.finished()) {
+    if (rng.chance(1, 50)) {
+      const Qty pos = live.exchange().account(kPlayer).position;
+      const Price last = live.exchange().mark();
+      if (pos == 0) {
+        live.player_submit(rng.chance(1, 2) ? Side::Buy : Side::Sell, OrderType::Market, 0, 2);
+      } else {
+        const auto r = pos > 0 ? live.player_submit(Side::Sell, OrderType::Stop, last - 3, pos)
+                               : live.player_submit(Side::Buy, OrderType::Stop, last + 3, -pos);
+        stops += r.ok();
+      }
+    }
+    live.run_ticks(1);
+  }
+  REQUIRE(stops > 0);
+  const auto log = snapshot::parse_actions(snapshot::actions_json(live.action_log()));
+  REQUIRE(log);
+  MarketSim replay(21, cfg, *log);
+  while (!replay.finished()) replay.step(200);
+  CHECK(replay.exchange().events().hash() == live.exchange().events().hash());
+  CHECK(replay.summary().pnl == live.summary().pnl);
+}
+
 TEST_CASE("action log JSON rejects malformed input") {
   std::string err;
   CHECK(snapshot::parse_actions("[]")->empty());
@@ -168,6 +196,7 @@ TEST_CASE("action log JSON rejects malformed input") {
   CHECK_FALSE(snapshot::parse_actions("[5,0,0,1,0,1,0, 4,0,0,1,0,1,0]", &err));  // out of order
   CHECK(err.find("order") != std::string::npos);
   CHECK_FALSE(snapshot::parse_actions("[0,9,0,1,0,1,0]", &err));
+  CHECK_FALSE(snapshot::parse_actions("[0,0,0,4,0,1,0]", &err));  // unknown order type
   CHECK_FALSE(snapshot::parse_actions("{}", &err));
 }
 

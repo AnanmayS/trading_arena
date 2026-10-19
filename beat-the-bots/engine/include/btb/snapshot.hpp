@@ -18,9 +18,11 @@
 
 namespace btb::snapshot {
 
-inline constexpr std::int64_t kVersion = 1;
+inline constexpr std::int64_t kVersion = 2;
 inline constexpr int kLevels = 20;     // book levels per side
 inline constexpr int kMaxOrders = 32;  // player working orders
+inline constexpr int kMaxStops = 16;   // player working stops
+static_assert(kMaxStops == static_cast<int>(kMaxStopsPerParticipant));
 
 // Header slots.
 enum Slot : int {
@@ -57,13 +59,15 @@ enum Slot : int {
   MaxPosition,
   PriceBand,
   Liquidations,
+  StopCount,
   HeaderSize = 48,
 };
 
 inline constexpr int kBidsOffset = HeaderSize;                 // kLevels x (price, qty, orders)
 inline constexpr int kAsksOffset = kBidsOffset + kLevels * 3;  // kLevels x (price, qty, orders)
 inline constexpr int kOrdersOffset = kAsksOffset + kLevels * 3;  // kMaxOrders x (id, side, price, qty)
-inline constexpr int kFrameSize = kOrdersOffset + kMaxOrders * 4;
+inline constexpr int kStopsOffset = kOrdersOffset + kMaxOrders * 4;  // kMaxStops x (id, side, trigger, qty)
+inline constexpr int kFrameSize = kStopsOffset + kMaxStops * 4;
 
 using Frame = std::array<std::int64_t, kFrameSize>;
 

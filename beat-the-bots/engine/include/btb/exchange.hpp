@@ -22,6 +22,19 @@ struct EventFilter {
   bool book_deltas = false;       // per-level BookDelta events
 };
 
+// A stop-market order waiting for its trigger. Held by the exchange, not the
+// book: it is invisible to other participants and never provides liquidity.
+struct StopOrder {
+  OrderId id = kNoOrder;
+  Price trigger = 0;
+  Qty qty = 0;
+  ParticipantId owner = 0;
+  Side side = Side::Buy;
+};
+
+// Working stops per participant (the frame snapshot has room for this many).
+inline constexpr std::uint32_t kMaxStopsPerParticipant = 16;
+
 struct ExchangeStats {
   std::uint64_t orders = 0;   // accepted + rejected submissions
   std::uint64_t cancels = 0;  // explicit cancel requests
@@ -44,11 +57,28 @@ class Exchange final : private MatchListener {
   void set_time(SimTime t) { now_ = t; }
   SimTime now() const { return now_; }
 
+  // OrderType::Stop places a stop-market with req.price as the trigger; the
+  // result's id is the stop's id and nothing fills yet.
   SubmitResult submit(ParticipantId who, OrderRequest req);
+  // Cancels a resting order or a working stop.
   bool cancel(ParticipantId who, OrderId id);
+  // Cancels every resting order and working stop of one participant.
   std::uint32_t cancel_all(ParticipantId who, CancelReason reason = CancelReason::User);
-  // Cancels all orders, then closes the position with a market order.
+  // Cancels all orders and stops, then closes the position with a market order.
   SubmitResult flatten(ParticipantId who);
+
+  // Triggers every stop the last trade has reached: a sell stop when
+  // last <= trigger, a buy stop when last >= trigger. Each one is removed,
+  // reported with a Trigger event and submitted as a market order through
+  // submit(), so it gets the same risk checks and price-band protection as a
+  // market order the player sends by hand. Stops are checked in id order, and
+  // the scan restarts after each trigger, so a cascade (one stop's fills
+  // reaching the next stop) resolves completely and deterministically.
+  //
+  // Runs outside the matching loop at two fixed points: at the end of every
+  // accepted submit() (after matching, before the margin check) and once per
+  // simulation tick after the bots have acted (before the margin check).
+  void check_stops();
 
   // Runs the maintenance-margin check for every risk-checked account and
   // liquidates breaches. Called by the simulation every tick and after every
@@ -89,6 +119,8 @@ class Exchange final : private MatchListener {
   // Resting orders of risk-checked participants (the player's working orders),
   // oldest first.
   const std::vector<OrderId>& tracked_orders() const { return tracked_; }
+  // Every working stop, oldest first.
+  const std::vector<StopOrder>& stops() const { return stops_; }
 
  private:
   // MatchListener
@@ -103,6 +135,9 @@ class Exchange final : private MatchListener {
   void reject(ParticipantId who, const OrderRequest& req, RejectReason r);
   void liquidate(ParticipantId p);
   void untrack(OrderId id);
+  SubmitResult place_stop(ParticipantId who, const OrderRequest& req);
+  std::uint32_t cancel_stops(ParticipantId who, CancelReason reason);
+  void emit_stop_cancel(const StopOrder& s, CancelReason reason);
   void emit(Event e) {
     e.time_us = now_;
     events_.push(e);
@@ -115,6 +150,7 @@ class Exchange final : private MatchListener {
   EventRing events_;
   std::vector<Account> accounts_;
   std::vector<OrderId> tracked_;
+  std::vector<StopOrder> stops_;
   ExchangeStats stats_;
 
   SimTime now_ = 0;
@@ -124,6 +160,7 @@ class Exchange final : private MatchListener {
   std::int64_t signed_volume_ = 0;
   bool closed_ = false;
   bool in_liquidation_ = false;
+  bool in_stops_ = false;
 
   SimTime vwap_start_ = -1;
   std::int64_t vwap_num_ = 0;  // sum price*qty (ticks*contracts)

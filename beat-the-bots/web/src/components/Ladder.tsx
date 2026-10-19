@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GameController } from '../game/controller';
 import { cssVar } from '../game/hooks';
 import { Side } from '../engine/layout';
@@ -7,7 +7,9 @@ import { ticksToPoints } from '../engine/format';
 // Price ladder (DOM) drawn on a canvas: one draw per engine frame, no React
 // re-render. Columns: my bids | bid size | price | ask size | my asks.
 // Click the bid side to buy at that price, the ask side to sell, and your own
-// working order to cancel it.
+// working order to cancel it. Shift-click (or STOP mode) places a stop-market
+// instead: bid side above the market = buy stop, ask side below = sell stop.
+// Stops show as dashed chips in the "my" columns.
 
 const ROW_H = 22;
 const COLS = [0.16, 0.22, 0.24, 0.22, 0.16];
@@ -55,7 +57,11 @@ export function Ladder({ ctrl, size }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sizeRef = useRef(size);
   sizeRef.current = size;
+  const [stopMode, setStopMode] = useState(false);
+  const stopModeRef = useRef(stopMode);
+  stopModeRef.current = stopMode;
   const ui = useRef({
+    shift: false,
     center: null as number | null,
     manualUntil: 0,
     hoverRow: -1,
@@ -110,11 +116,17 @@ export function Ladder({ ctrl, size }: Props) {
       let maxQty = 1;
       for (const l of f.bids) maxQty = Math.max(maxQty, l.qty);
       for (const l of f.asks) maxQty = Math.max(maxQty, l.qty);
-      const mine = new Map<string, number>();
-      for (const o of f.orders) {
-        const k = `${o.side}:${o.price}`;
-        mine.set(k, (mine.get(k) ?? 0) + o.qty);
-      }
+      const sum = (orders: typeof f.orders) => {
+        const m = new Map<string, number>();
+        for (const o of orders) {
+          const k = `${o.side}:${o.price}`;
+          m.set(k, (m.get(k) ?? 0) + o.qty);
+        }
+        return m;
+      };
+      const mine = sum(f.orders);
+      const myStops = sum(f.stops);
+      const stopHint = stopModeRef.current || s.shift;
       const avg = f.position !== 0 ? Math.round(f.openCost / f.position) : null;
       const liq = f.position !== 0 && f.ticksToLiq >= 0 ? f.mark - Math.sign(f.position) * f.ticksToLiq : null;
       const flash = ctrl.flash && now - ctrl.flash.at < 450 ? ctrl.flash : null;
@@ -205,18 +217,21 @@ export function Ladder({ ctrl, size }: Props) {
         // Working orders and hover hints.
         const myBid = mine.get(`${Side.Buy}:${price}`);
         const myAsk = mine.get(`${Side.Sell}:${price}`);
-        drawChip(ctx, xs[0], xs[1], cy, myBid, p.buy, r === s.hoverRow && s.hoverCol === 0);
-        drawChip(ctx, xs[4], xs[5], cy, myAsk, p.sell, r === s.hoverRow && s.hoverCol === 4);
+        const buyStop = myStops.get(`${Side.Buy}:${price}`);
+        const sellStop = myStops.get(`${Side.Sell}:${price}`);
+        drawCell(ctx, xs[0], xs[1], cy, myBid, buyStop, p.buy, r === s.hoverRow && s.hoverCol === 0);
+        drawCell(ctx, xs[4], xs[5], cy, myAsk, sellStop, p.sell, r === s.hoverRow && s.hoverCol === 4);
         if (r === s.hoverRow && !f.finished) {
           ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
           ctx.textAlign = 'center';
-          if ((s.hoverCol === 0 && !myBid) || s.hoverCol === 1) {
+          const hint = (verb: string) => (stopHint ? `${verb} STP ${sizeRef.current}` : `${verb} ${sizeRef.current}`);
+          if ((s.hoverCol === 0 && !myBid && !buyStop) || s.hoverCol === 1) {
             ctx.fillStyle = p.buy;
-            ctx.fillText(`BUY ${sizeRef.current}`, (xs[0] + xs[1]) / 2, cy);
+            ctx.fillText(hint('BUY'), (xs[0] + xs[1]) / 2, cy);
           }
-          if ((s.hoverCol === 4 && !myAsk) || s.hoverCol === 3) {
+          if ((s.hoverCol === 4 && !myAsk && !sellStop) || s.hoverCol === 3) {
             ctx.fillStyle = p.sell;
-            ctx.fillText(`SELL ${sizeRef.current}`, (xs[4] + xs[5]) / 2, cy);
+            ctx.fillText(hint('SELL'), (xs[4] + xs[5]) / 2, cy);
           }
         }
       }
@@ -261,6 +276,7 @@ export function Ladder({ ctrl, size }: Props) {
 
     const onMove = (ev: PointerEvent) => {
       const { row, col } = locate(ev);
+      s.shift = ev.shiftKey;
       s.hoverRow = row;
       s.hoverCol = col;
       canvas.style.cursor = col === 2 ? 'default' : 'pointer';
@@ -276,14 +292,22 @@ export function Ladder({ ctrl, size }: Props) {
       const f = ctrl.frame;
       if (col === 0 || col === 4) {
         const side = col === 0 ? Side.Buy : Side.Sell;
-        const own = f.orders.filter((o) => o.side === side && o.price === price);
+        const own = [...f.orders, ...f.stops].filter((o) => o.side === side && o.price === price);
         if (own.length) {
           for (const o of own) ctrl.cancel(o.id);
           return;
         }
       }
-      if (col === 0 || col === 1) ctrl.limit(Side.Buy, price, sizeRef.current);
-      else if (col === 3 || col === 4) ctrl.limit(Side.Sell, price, sizeRef.current);
+      const side = col <= 1 ? Side.Buy : col >= 3 ? Side.Sell : null;
+      if (side === null) return;
+      if (ev.shiftKey || stopModeRef.current) ctrl.stopOrder(side, price, sizeRef.current);
+      else ctrl.limit(side, price, sizeRef.current);
+    };
+    // Holding Shift over the ladder switches the hover hint to stops.
+    const onShift = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Shift' || s.shift === ev.shiftKey) return;
+      s.shift = ev.shiftKey;
+      if (s.hoverRow >= 0) draw();
     };
     const onWheel = (ev: WheelEvent) => {
       ev.preventDefault();
@@ -299,6 +323,8 @@ export function Ladder({ ctrl, size }: Props) {
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('click', onClick);
     canvas.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('keydown', onShift);
+    window.addEventListener('keyup', onShift);
     resize();
     return () => {
       ro.disconnect();
@@ -307,6 +333,8 @@ export function Ladder({ ctrl, size }: Props) {
       canvas.removeEventListener('pointerleave', onLeave);
       canvas.removeEventListener('click', onClick);
       canvas.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onShift);
+      window.removeEventListener('keyup', onShift);
     };
   }, [ctrl]);
 
@@ -319,22 +347,69 @@ export function Ladder({ ctrl, size }: Props) {
     <div className="panel flex h-full min-h-0 flex-col" data-coach="ladder">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
         <span className="panel-title">Order book</span>
-        <button type="button" onClick={recenter} className="text-[11px] text-muted hover:text-text" title="Re-center on the market">
-          Re-center
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setStopMode((m) => !m)}
+            aria-pressed={stopMode}
+            aria-label="Stop mode"
+            title="Stop mode: ladder clicks place stop-market orders that trade at market once the price reaches them. Bid side above the market = buy stop, ask side below = sell stop. Or hold Shift while clicking."
+            className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${
+              stopMode ? 'border-accent bg-accent text-bg' : 'border-line text-muted hover:text-text'
+            }`}
+          >
+            STOP
+          </button>
+          <button type="button" onClick={recenter} className="text-[11px] text-muted hover:text-text" title="Re-center on the market">
+            Re-center
+          </button>
+        </div>
       </div>
+      {stopMode && (
+        <div className="border-b border-line bg-panel-2 px-3 py-1 text-[11px] text-accent">
+          Stop mode: buy stops above the market on the bid side, sell stops below it on the ask side.
+        </div>
+      )}
       <div className="grid grid-cols-[16fr_22fr_24fr_22fr_16fr] border-b border-line px-0 py-1 text-center text-[10px] uppercase tracking-wider text-muted">
-        <span>My bids</span>
+        <span>{stopMode ? 'Stops' : 'My bids'}</span>
         <span className="text-buy">Bids</span>
         <span>Price</span>
         <span className="text-sell">Asks</span>
-        <span>My asks</span>
+        <span>{stopMode ? 'Stops' : 'My asks'}</span>
       </div>
-      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden" aria-label="Price ladder: click the bid side to buy, the ask side to sell">
+      <div
+        ref={wrapRef}
+        className="relative min-h-0 flex-1 overflow-hidden"
+        aria-label="Price ladder: click the bid side to buy, the ask side to sell; shift-click for a stop"
+        title="Click: limit order · Shift-click: stop order · click your own order or stop to cancel it"
+      >
         <canvas ref={canvasRef} className="absolute inset-0 touch-none select-none" />
       </div>
     </div>
   );
+}
+
+// One "my orders" cell: a solid chip for resting orders, a dashed hollow chip
+// for stops, side by side if a cell has both.
+function drawCell(
+  ctx: CanvasRenderingContext2D,
+  x0: number,
+  x1: number,
+  cy: number,
+  qty: number | undefined,
+  stopQty: number | undefined,
+  color: string,
+  hover: boolean,
+) {
+  if (qty && stopQty) {
+    const mid = (x0 + x1) / 2;
+    drawChip(ctx, x0, mid + 2, cy, String(qty), color, hover, false);
+    drawChip(ctx, mid - 2, x1, cy, `S${stopQty}`, color, hover, true);
+  } else if (qty) {
+    drawChip(ctx, x0, x1, cy, String(qty), color, hover, false);
+  } else if (stopQty) {
+    drawChip(ctx, x0, x1, cy, `STP ${stopQty}`, color, hover, true);
+  }
 }
 
 function drawChip(
@@ -342,20 +417,22 @@ function drawChip(
   x0: number,
   x1: number,
   cy: number,
-  qty: number | undefined,
+  label: string,
   color: string,
   hover: boolean,
+  stop: boolean,
 ) {
-  if (!qty) return;
   const w = x1 - x0 - 10;
   ctx.fillStyle = color;
-  ctx.globalAlpha = hover ? 0.4 : 0.22;
+  ctx.globalAlpha = stop ? (hover ? 0.2 : 0.06) : hover ? 0.4 : 0.22;
   ctx.fillRect(x0 + 5, cy - 8, w, 16);
   ctx.globalAlpha = 1;
   ctx.strokeStyle = color;
+  if (stop) ctx.setLineDash([3, 2]);
   ctx.strokeRect(x0 + 5.5, cy - 7.5, w - 1, 15);
+  ctx.setLineDash([]);
   ctx.fillStyle = color;
   ctx.font = 'bold 11px ui-monospace, Menlo, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(hover ? '✕' : String(qty), (x0 + x1) / 2, cy);
+  ctx.fillText(hover ? '✕' : label, (x0 + x1) / 2, cy);
 }

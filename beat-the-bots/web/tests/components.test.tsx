@@ -41,6 +41,7 @@ const frame = (over: Partial<Frame> = {}): Frame => ({
   bids: [],
   asks: [],
   orders: [],
+  stops: [],
   ...over,
 });
 
@@ -115,6 +116,13 @@ describe('Controls', () => {
     expect(onSize).toHaveBeenCalledWith(7);
     expect((screen.getByRole('button', { name: /FLATTEN/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /CANCEL ALL/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('counts working stops for cancel-all and flatten', () => {
+    const c = fakeCtrl(frame({ stops: [{ id: 9, side: 1, price: 19990, qty: 1 }] }));
+    render(<Controls ctrl={c as unknown as GameController} size={1} onSize={() => {}} />);
+    expect((screen.getByRole('button', { name: /CANCEL ALL/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: /FLATTEN/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('locks trading once the round is over', () => {

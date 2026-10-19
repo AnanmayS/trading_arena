@@ -54,7 +54,8 @@ class Engine {
   }
 
   // Returns the new order id, or 0 if rejected (the reason arrives as a
-  // Reject event).
+  // Reject event). type 3 (OrderType::Stop) places a stop-market with
+  // price_ticks as its trigger; the engine decides when it fires.
   double submit(int side, int type, int price_ticks, int qty) {
     const SubmitResult r =
         sim_->player_submit(static_cast<Side>(side), static_cast<OrderType>(type), price_ticks, qty);

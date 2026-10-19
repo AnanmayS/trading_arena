@@ -28,6 +28,9 @@ enum class OrderType : std::uint8_t {
   Limit = 0,   // rests whatever does not fill immediately
   Market = 1,  // sweeps the book, remainder is cancelled
   IOC = 2,     // limit price, remainder is cancelled
+  Stop = 3,    // stop-market: price is the trigger. Held by the Exchange, never
+               //   rests in the book; becomes a market order when the last
+               //   trade reaches the trigger (see Exchange::check_stops)
 };
 
 enum class CancelReason : std::uint8_t {
@@ -51,6 +54,8 @@ enum class RejectReason : std::uint8_t {
   UnknownOrder = 9,
   Liquidating = 10,
   NoLiquidity = 11,
+  StopPrice = 12,       // stop trigger already reached by the last trade
+  TooManyStops = 13,
 };
 
 const char* to_string(RejectReason r);

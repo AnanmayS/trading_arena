@@ -16,9 +16,11 @@ namespace btb {
 
 enum class EventType : std::uint8_t {
   Ack = 1,          // order accepted: order_id, participant, side, price, qty, reason=OrderType
+                    //   (a stop's Ack has reason=Stop and price=trigger)
   Fill = 2,         // one side of a trade: participant, order_id, side, price, qty,
                     //   value=position after fill, flags bit0=maker
-  Cancel = 3,       // order removed: order_id, participant, side, price, qty=remaining, reason=CancelReason
+  Cancel = 3,       // order removed: order_id, participant, side, price, qty=remaining, reason=CancelReason,
+                    //   flags bit1=stop order (price=trigger)
   Reject = 4,       // order refused: participant, side, price, qty, reason=RejectReason
   Trade = 5,        // public print: price, qty, side=aggressor, order_id=taker order,
                     //   participant=taker, aux=maker participant
@@ -27,6 +29,8 @@ enum class EventType : std::uint8_t {
   Liquidation = 8,  // participant, qty=position being closed
   News = 9,         // aux=headline id, value=sentiment (-3..3)
   Settlement = 10,  // participant, price=settlement price, qty=position settled, value=final P&L
+  Trigger = 11,     // stop triggered: order_id=stop id, participant, side, price=trigger, qty,
+                    //   value=last trade that reached it; the market order's Ack/Fill/Reject follow
 };
 
 struct Event {

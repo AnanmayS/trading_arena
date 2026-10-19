@@ -18,7 +18,7 @@ export function Controls({ ctrl, size, onSize }: Props) {
   useFrame(ctrl);
   const f = ctrl.frame;
   const closed = f.finished || ctrl.paused || ctrl.replay;
-  const working = f.orders.length;
+  const working = f.orders.length + f.stops.length;
 
   return (
     <div className="panel flex flex-col gap-3 p-3">
