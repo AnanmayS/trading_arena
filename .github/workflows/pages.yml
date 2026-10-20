@@ -29,10 +29,9 @@ jobs:
           cache: npm
           cache-dependency-path: beat-the-bots/web/package-lock.json
       - run: npm ci
+      # Pages serves the site under /<repo>/; everywhere else it lives at the root.
       - name: Build
-        run: npm run build
-        env:
-          BASE_PATH: /${{ github.event.repository.name }}/
+        run: npx tsc -b && npx vite build --base=/${{ github.event.repository.name }}/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
