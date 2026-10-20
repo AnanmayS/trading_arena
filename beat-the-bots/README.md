@@ -2,7 +2,7 @@
 
 **Trade a futures contract against 32 trading bots, in your browser.** The exchange, the bots and the risk engine are a C++20 matching engine compiled to WebAssembly; everything runs client-side, with no server.
 
-**▶ Play:** _live link: see [Deploying](#deploying)_ · **Source:** this folder
+**▶ Play:** [ananmays.github.io/trading_arena](https://ananmays.github.io/trading_arena/) · **Source:** this folder
 
 ![Beat the Bots gameplay](docs/demo.gif)
 
@@ -137,7 +137,9 @@ URL parameters: `seed`, `diff` (`easy|normal|hard`), `scenario` (`flash_crash|sh
 
 ## Deploying
 
-The site is a static Vite build. On Vercel: import the GitHub repo, set **Root Directory** to `beat-the-bots/web` (framework: Vite, build `npm run build`, output `dist`; `web/vercel.json` already sets these and long-lived caching for hashed assets). Every push to `main` redeploys.
+The site is a static Vite build. It is live on GitHub Pages: `.github/workflows/pages.yml` builds `web/` with `BASE_PATH=/trading_arena/` and publishes it on every push to `main` that touches `web/`.
+
+To host it on Vercel instead: import the GitHub repo, set **Root Directory** to `beat-the-bots/web` (framework: Vite, build `npm run build`, output `dist`; `web/vercel.json` already sets these and long-lived caching for hashed assets). Every push to `main` redeploys.
 
 ## Controls
 
